@@ -359,7 +359,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                             boundCamera?.cameraControl?.enableTorch(false)
                             isRecording = false
                         } else {
-                            boundCamera?.cameraControl?.enableTorch(flashEnabled)
+                            if (boundCamera?.cameraInfo?.hasFlashUnit() == true) boundCamera?.cameraControl?.enableTorch(flashEnabled)
                             val recorder = videoCapture
                             if (recorder == null) {
                                 Toast.makeText(context, "Vidéo indisponible sur cette caméra.", Toast.LENGTH_SHORT).show()
@@ -668,7 +668,7 @@ private fun CameraPreview(
                     capture = ImageCapture.Builder().setCaptureMode(captureMode).build()
                     provider.bindToLifecycle(lifecycleOwner, selector, preview, capture, video)
                 }
-                capture.flashMode = if (flashEnabled && lensFacing == CameraSelector.LENS_FACING_BACK) ImageCapture.FLASH_MODE_ON else ImageCapture.FLASH_MODE_OFF
+                capture.flashMode = if (flashEnabled && lensFacing == CameraSelector.LENS_FACING_BACK && camera.cameraInfo.hasFlashUnit()) ImageCapture.FLASH_MODE_ON else ImageCapture.FLASH_MODE_OFF
                 camera.cameraControl.enableTorch(false)
                 onCaptureReady(capture, camera, video)
             } catch (_: Exception) {
@@ -747,7 +747,7 @@ private fun capturePhoto(
                         context.contentResolver.openOutputStream(pngUri).use { stream -> if (stream == null || !bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, stream)) error("Écriture PNG impossible") }
                         bitmap.recycle(); context.contentResolver.delete(saved, null, null)
                         Toast.makeText(context, "PNG enregistré dans Pictures/OmniCam", Toast.LENGTH_SHORT).show()
-                        analyze(pngUri)
+                        if (mode == "PORTRAIT") PortraitProcessor.process(context, pngUri) { portraitUri -> analyze(portraitUri ?: pngUri) } else analyze(pngUri)
                     } catch (e: Exception) { Toast.makeText(context, "Conversion PNG impossible : ${e.message}", Toast.LENGTH_LONG).show(); analyze(saved) }
                 } else if (mode == "PORTRAIT") {
                     Toast.makeText(context, "Détourage du sujet par IA…", Toast.LENGTH_SHORT).show()
