@@ -2,6 +2,7 @@ package com.omnicam.ai
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.os.Build
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.assertFalse
@@ -30,7 +31,8 @@ class ProductionManifestTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         assertNotNull(context.packageName)
         val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
-        assertTrue(packageInfo.longVersionCode > 0L)
+        val versionCode = if (Build.VERSION.SDK_INT >= 28) packageInfo.longVersionCode else packageInfo.versionCode.toLong()
+        assertTrue(versionCode > 0L)
         assertFalse(packageInfo.versionName.isNullOrBlank())
     }
 }
