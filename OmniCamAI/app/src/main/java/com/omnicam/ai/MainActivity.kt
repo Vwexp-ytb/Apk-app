@@ -187,6 +187,11 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
     var capabilityText by remember { mutableStateOf("Lecture des capacités caméra…") }
     var aiStatus by remember { mutableStateOf("Les photos sont analysées localement après la capture.") }
     var latestPhoto by remember { mutableStateOf<Bitmap?>(null) }
+    var showPortraitControls by remember { mutableStateOf(true) }
+    var portraitPixelSize by remember { mutableStateOf(14) }
+    var portraitShape by remember { mutableStateOf("Carré") }
+    var portraitEdgeSoftness by remember { mutableStateOf(58) }
+    var portraitMosaicSmoothing by remember { mutableStateOf(42) }
     val lensOptions = remember(context) {
         val manager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
         manager.cameraIdList.mapNotNull { id ->
@@ -336,6 +341,17 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                 // Minimal shutter strip.
                 Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     RoundAction(Icons.Default.PhotoLibrary, "Galerie") { latestPhoto = loadLatestPhotoBitmap(context); page = AppPage.GALLERY }
+                    RoundAction(Icons.Default.Tune, "Autofocus central") {
+                        val camera = boundCamera
+                        val preview = context as? ComponentActivity
+                        if (camera != null) {
+                            val action = FocusMeteringAction.Builder(androidx.camera.core.MeteringPointFactory { x, y ->
+                                androidx.camera.core.MeteringPoint(x, y, 0.18f)
+                            }.createPoint(0.5f, 0.5f)).setAutoCancelDuration(3, TimeUnit.SECONDS).build()
+                            camera.cameraControl.startFocusAndMetering(action)
+                            Toast.makeText(context, "Autofocus et mesure au centre", Toast.LENGTH_SHORT).show()
+                        }
+                    }
                     Box(
                         Modifier.size(76.dp).clip(CircleShape).background(Color.White).padding(5.dp)
                             .clip(CircleShape).background(Accent).clickable {
@@ -343,7 +359,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                                 if (outputFormat == "DNG") { context.startActivity(Intent(context, RawCaptureActivity::class.java)) }
                                 else if (capture == null) Toast.makeText(context, "Caméra en cours d’initialisation", Toast.LENGTH_SHORT).show()
                                 else if (boundCamera == null) Toast.makeText(context, "Caméra indisponible", Toast.LENGTH_SHORT).show()
-                                else capturePhoto(context, capture, boundCamera!!, selectedMode, cameraExecutor, outputFormat, aiEnabled) { summary ->
+                                else capturePhoto(context, capture, boundCamera!!, selectedMode, cameraExecutor, outputFormat, aiEnabled, portraitPixelSize, portraitShape, portraitEdgeSoftness, portraitMosaicSmoothing) { summary ->
                                     aiStatus = summary
                                     page = AppPage.AI
                                 }
@@ -455,7 +471,24 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                     SettingTile("Galerie", "Afficher la dernière photo dans OmniCam", "Ouvrir") { latestPhoto = loadLatestPhotoBitmap(context); page = AppPage.GALLERY }
                     SectionTitle("INTELLIGENCE ARTIFICIELLE", "Traitement local sur le téléphone.")
                     SettingTile("Analyse IA", if (aiEnabled) "Analyse locale activée après capture" else "Analyse désactivée", if (aiEnabled) "Désactiver" else "Activer") { aiEnabled = !aiEnabled }
-                    SettingTile("Mise au point tactile", "Touchez l’aperçu pour faire le point", "Retour caméra") { page = AppPage.CAMERA }
+                    SettingTile("Mise au point tactile", "Touchez l’aperçu pour faire le point ; l’AF continu reste actif", "Retour caméra") { page = AppPage.CAMERA }
+                    SectionTitle("PORTRAIT IA", "Réglages du détourage et de la mosaïque d’arrière-plan.")
+                    SettingTile("Afficher les réglages portrait", if (showPortraitControls) "Panneau de réglage visible" else "Panneau de réglage masqué", if (showPortraitControls) "Masquer" else "Afficher") { showPortraitControls = !showPortraitControls }
+                    if (showPortraitControls) {
+                        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Panel).padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("Taille des blocs : $portraitPixelSize px", color = Color.White, fontSize = 12.sp)
+                            Slider(value = portraitPixelSize.toFloat(), onValueChange = { portraitPixelSize = it.roundToInt() }, valueRange = 4f..48f, steps = 43)
+                            Text("Forme des cellules", color = Color.White, fontSize = 12.sp)
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                                listOf("Carré", "Arrondi", "Diamant").forEach { shape -> TextButton(onClick = { portraitShape = shape }) { Text(shape, color = if (portraitShape == shape) Accent else Muted) } }
+                            }
+                            Text("Adoucissement des contours : $portraitEdgeSoftness %", color = Color.White, fontSize = 12.sp)
+                            Slider(value = portraitEdgeSoftness.toFloat(), onValueChange = { portraitEdgeSoftness = it.roundToInt() }, valueRange = 0f..100f, steps = 9)
+                            Text("Lissage visuel : $portraitMosaicSmoothing %", color = Color.White, fontSize = 12.sp)
+                            Slider(value = portraitMosaicSmoothing.toFloat(), onValueChange = { portraitMosaicSmoothing = it.roundToInt() }, valueRange = 0f..100f, steps = 9)
+                            Text("Le lissage adoucit les cellules et les contours sans supprimer le détourage du sujet.", color = Muted, fontSize = 11.sp, lineHeight = 15.sp)
+                        }
+                    }
                     Text("Les fonctions non prises en charge par l’API caméra du téléphone ne sont pas activées artificiellement.", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 8.dp))
                 }
             }
@@ -691,6 +724,10 @@ private fun capturePhoto(
     cameraExecutor: ExecutorService,
     outputFormat: String,
     aiEnabled: Boolean,
+    portraitPixelSize: Int,
+    portraitShape: String,
+    portraitEdgeSoftness: Int,
+    portraitMosaicSmoothing: Int,
     onAnalysis: (String) -> Unit
 ) {
     fun analyze(uri: android.net.Uri) {
@@ -747,11 +784,11 @@ private fun capturePhoto(
                         context.contentResolver.openOutputStream(pngUri).use { stream -> if (stream == null || !bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, stream)) error("Écriture PNG impossible") }
                         bitmap.recycle(); context.contentResolver.delete(saved, null, null)
                         Toast.makeText(context, "PNG enregistré dans Pictures/OmniCam", Toast.LENGTH_SHORT).show()
-                        if (mode == "PORTRAIT") PortraitProcessor.process(context, pngUri) { portraitUri -> analyze(portraitUri ?: pngUri) } else analyze(pngUri)
+                        if (mode == "PORTRAIT") PortraitProcessor.process(context, pngUri, portraitPixelSize, portraitShape, portraitEdgeSoftness, portraitMosaicSmoothing) { portraitUri -> analyze(portraitUri ?: pngUri) } else analyze(pngUri)
                     } catch (e: Exception) { Toast.makeText(context, "Conversion PNG impossible : ${e.message}", Toast.LENGTH_LONG).show(); analyze(saved) }
                 } else if (mode == "PORTRAIT") {
                     Toast.makeText(context, "Détourage du sujet par IA…", Toast.LENGTH_SHORT).show()
-                    PortraitProcessor.process(context, saved) { portraitUri ->
+                    PortraitProcessor.process(context, saved, portraitPixelSize, portraitShape, portraitEdgeSoftness, portraitMosaicSmoothing) { portraitUri ->
                         if (portraitUri != null) {
                             Toast.makeText(context, "Portrait avec fond pixelisé enregistré", Toast.LENGTH_LONG).show()
                             analyze(portraitUri)
