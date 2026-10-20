@@ -101,4 +101,5 @@ jobs:
           tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', steps.version.outputs.name) }}
           name: OmniCam AI ${{ steps.version.outputs.name }}
           generate_release_notes: true
+          prerelease: ${{ contains(steps.version.outputs.name, '-') }}
           files: ${{ steps.version.outputs.apk_name }}
