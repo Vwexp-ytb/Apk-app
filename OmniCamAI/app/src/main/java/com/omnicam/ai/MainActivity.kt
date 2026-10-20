@@ -197,6 +197,22 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
         }.getOrDefault(listOf(30))
     }
 
+    val availableVideoQuality = remember(selectedCameraId, lensFacing) {
+        runCatching {
+            val manager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+            val id = selectedCameraId ?: manager.cameraIdList.firstOrNull { manager.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) == if (lensFacing == CameraSelector.LENS_FACING_BACK) CameraCharacteristics.LENS_FACING_BACK else CameraCharacteristics.LENS_FACING_FRONT }
+            val sizes = id?.let { manager.getCameraCharacteristics(it).get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)?.getOutputSizes(android.media.MediaRecorder::class.java) }.orEmpty()
+            val maxDimension = sizes.maxOfOrNull { maxOf(it.width, it.height) } ?: 1280
+            buildList {
+                if (maxDimension >= 640) add("SD")
+                if (maxDimension >= 1280) add("HD")
+                if (maxDimension >= 1920) add("FHD")
+                if (maxDimension >= 3840) add("UHD")
+            }.ifEmpty { listOf("SD") }
+        }.getOrDefault(listOf("SD"))
+    }
+    LaunchedEffect(availableVideoQuality) { if (videoQuality !in availableVideoQuality) videoQuality = availableVideoQuality.last() }
+
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         hasPermission = granted
         if (!granted) Toast.makeText(context, "L’autorisation caméra est nécessaire pour photographier.", Toast.LENGTH_LONG).show()
@@ -232,6 +248,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                             videoQuality = videoQuality,
                             videoFps = videoFps,
                             availableVideoFps = availableVideoFps,
+                            availableVideoQuality = availableVideoQuality,
                             photoResolution = photoResolution,
                             onCaptureReady = { capture, camera, video ->
                                 imageCapture = capture
@@ -359,7 +376,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                         Text("Résolution : $photoResolution", color = Color.White, fontSize = 11.sp)
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) { listOf("Maximale", "HD", "4K").forEach { res -> TextButton(onClick = { photoResolution = res }) { Text(res, color = if (photoResolution == res) Accent else Muted) } } }
                         Text("Vidéo Pro · qualité $videoQuality · ${videoFps} fps", color = Color.White, fontSize = 11.sp)
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) { listOf("SD", "HD", "FHD", "UHD").forEach { q -> TextButton(onClick = { videoQuality = q }) { Text(q, color = if (videoQuality == q) Accent else Muted) } } }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) { availableVideoQuality.forEach { q -> TextButton(onClick = { videoQuality = q }) { Text(q, color = if (videoQuality == q) Accent else Muted) } } }
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) { availableVideoFps.forEach { fps -> TextButton(onClick = { videoFps = fps }) { Text("$fps fps", color = if (videoFps == fps) Accent else Muted) } } }
                     }
                     val range = boundCamera?.cameraInfo?.exposureState?.exposureCompensationRange
@@ -423,9 +440,9 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                     SectionTitle("OMNICAM IA", "Outils disponibles dans cette version.")
                     SettingTile("Analyse de scène", "Classification locale de la photo après capture", "Ouvrir la galerie") { openGallery(context) }
                     SettingTile("Dernier résultat", aiStatus, "Réinitialiser") { aiStatus = "Les photos sont analysées localement après la capture." }
-                    SettingTile("Mode nuit", "Capture priorisant la qualité, sans fusion multi-images", "Activer") { selectedMode = "NUIT"; page = AppPage.CAMERA }
+                    SettingTile("Mode nuit", "Fusion multi-images pour réduire le bruit", "Activer") { selectedMode = "NUIT"; page = AppPage.CAMERA }
                     SettingTile("Mode portrait", "Détourage du sujet et flou de fond par IA locale", "Activer") { selectedMode = "PORTRAIT"; page = AppPage.CAMERA }
-                    Text("HDR et mode nuit utilisent une fusion multi-images. Le mode portrait utilise la segmentation locale ML Kit et un flou d’arrière-plan. La retouche générative et les commandes RAW restent à développer.", color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
+                    Text("HDR et mode nuit fusionnent plusieurs images. Le mode portrait segmente le sujet et applique un arrière-plan légèrement pixelisé. L’analyse de scène est désactivable dans les paramètres.", color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
                 }
             }
         }
@@ -554,6 +571,7 @@ private fun CameraPreview(
     videoQuality: String,
     videoFps: Int,
     availableVideoFps: List<Int>,
+    availableVideoQuality: List<String>,
     photoResolution: String,
     onCaptureReady: (ImageCapture, Camera, VideoCapture<Recorder>) -> Unit,
     onTapToFocus: (PreviewView, Offset) -> Unit,
