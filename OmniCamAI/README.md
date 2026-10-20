@@ -105,3 +105,27 @@ Le workflow de publication `.github/workflows/release-omnicam.yml` produit un **
 - [ ] Tests de performance comparatifs et profils de compatibilité par modèle d'appareil.
 
 Une compilation réussie ne remplace pas les essais sur appareils physiques, la validation de sécurité/confidentialité ni l'acceptation de la boutique.
+
+
+## Travaux de mise en production ajoutés
+
+- Les réglages caméra (mode, objectif, grille, flash, format, IA, ISO, exposition, température de couleur, vidéo et paramètres Portrait) sont maintenant conservés localement entre les lancements.
+- L'écran **Confidentialité** décrit les permissions et traitements connus de cette version. Le fichier [PRIVACY_POLICY.md](PRIVACY_POLICY.md) reste un brouillon : il faut renseigner le responsable et le contact, vérifier le binaire/dépendances, puis publier la politique à une URL publique avant diffusion.
+- L'écran **À propos** affiche la version, Android et le modèle du téléphone pour faciliter les rapports de compatibilité.
+- La galerie OmniCam liste les fichiers dont le nom commence par `OmniCam`, permet de partager un média avec l'API Android et demande confirmation avant suppression. Elle ne cherche pas à parcourir toute la galerie personnelle.
+- Une icône d'application dédiée est configurée. Le manifeste désactive le trafic HTTP non chiffré et n'ajoute pas la permission INTERNET.
+- La CI exécute désormais les tests JVM, le lint, une compilation Debug, une compilation Release candidate non signée et génère un inventaire des dépendances.
+- Le workflow de publication valide le keystore et l'alias, construit l'APK signé, vérifie sa signature puis publie l'APK dans une GitHub Release.
+
+## Ce qui bloque encore la publication publique
+
+1. Configurer les quatre secrets de signature GitHub Actions et tester l'installation par-dessus une version antérieure signée avec **la même clé**. Aucune clé privée n'est stockée dans le dépôt.
+2. Remplacer les champs responsable/contact de la politique de confidentialité et publier son URL publique.
+3. Examiner la sortie lint, l'inventaire des dépendances et les licences/transferts de données de chaque bibliothèque, puis remplir Google Play Data safety.
+4. Fournir une adresse de support, préparer la fiche de boutique, la classification d'âge et les captures d'écran réelles.
+5. Tester sur plusieurs téléphones physiques et versions Android. La CI Linux ne peut pas valider la chauffe, l'autofocus physique, les performances capteur, le comportement OEM ou la conservation effective des données lors d'une mise à jour.
+6. Le workflow CI crée un candidat Release **non signé** uniquement pour vérifier que le variant compile. Seul le workflow de publication avec les secrets de production peut créer un APK distribuable signé.
+7. La galerie ne peut partager/supprimer que les fichiers qu'Android rend accessibles et dont le nom commence par `OmniCam`. Les fichiers existants qui n'ont pas ce préfixe ne sont pas répertoriés.
+8. Le canal de mise à jour automatique intégré à l'application n'est pas implémenté ; pour l'instant, il faut télécharger puis installer l'APK publié (ou distribuer l'application via Google Play).
+
+Les workflows automatisés sont un filet de sécurité, pas une preuve de compatibilité universelle ni une certification juridique.
