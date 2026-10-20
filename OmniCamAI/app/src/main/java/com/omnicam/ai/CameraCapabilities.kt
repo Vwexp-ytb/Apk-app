@@ -26,6 +26,8 @@ fun describeCameraHardware(context: Context): String {
             }
             val map = c.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
             val jpeg = map?.getOutputSizes(ImageFormat.JPEG).orEmpty()
+            val videoSizes = map?.getOutputSizes(android.media.MediaRecorder::class.java).orEmpty()
+            val fpsRanges = c.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES).orEmpty()
             val raw = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 map?.getOutputSizes(ImageFormat.RAW_SENSOR).orEmpty()
             } else emptyArray()
@@ -85,6 +87,10 @@ fun describeCameraHardware(context: Context): String {
                 append("\nExposition : ${exposure?.lower ?: "?"}–${exposure?.upper ?: "?"} ns")
                 append("\nStabilisation optique : ${c.get(CameraCharacteristics.LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION)?.contains(CameraCharacteristics.LENS_OPTICAL_STABILIZATION_MODE_ON) == true}")
                 append("\nTailles JPEG disponibles : ${jpeg.size}")
+                append("\nRésolutions JPEG : ${jpeg.sortedByDescending { it.width.toLong() * it.height }.take(12).joinToString { "${it.width}×${it.height}" }.ifBlank { "Non communiquées" }}")
+                append("\nTailles vidéo exposées : ${videoSizes.size}")
+                append("\nRésolutions vidéo : ${videoSizes.sortedByDescending { it.width.toLong() * it.height }.take(10).joinToString { "${it.width}×${it.height}" }.ifBlank { "Non communiquées" }}")
+                append("\nPlages FPS annoncées : ${fpsRanges.joinToString { "${it.lower}–${it.upper} fps" }.ifBlank { "Non communiquées" }}")
                 append("\nModules physiques annoncés : $physical")
             }
         }
