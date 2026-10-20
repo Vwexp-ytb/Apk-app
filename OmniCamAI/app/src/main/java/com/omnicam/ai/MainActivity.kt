@@ -1,4 +1,4 @@
-@file:OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
+@file:androidx.annotation.OptIn(markerClass = [androidx.camera.camera2.interop.ExperimentalCamera2Interop::class])
 
 package com.omnicam.ai
 
