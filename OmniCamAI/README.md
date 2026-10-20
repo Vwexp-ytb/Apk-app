@@ -18,11 +18,12 @@ Application Android native Kotlin / Jetpack Compose, CameraX et Camera2. Projet 
 - **RAW / DNG** : écran Camera2 dédié qui ouvre un module arrière exposant `RAW_SENSOR`, enregistre un DNG avec `DngCreator` et permet de régler ISO, temps de pose et distance de mise au point. Les valeurs acceptées dépendent du pilote ; certaines combinaisons de flux peuvent être refusées.
 - **Vidéo** : enregistrement HD sans audio vers `Movies/OmniCam`. Le microphone n’est pas demandé.
 - **IA** : classification de scène locale par ML Kit après capture.
-- **Capteurs** : identifiants, niveau Camera2, taille de capteur, tailles JPEG/RAW annoncées, focales, ISO, plage d’exposition, autofocus, flash et stabilisation lorsque les informations sont exposées.
+- **Objectifs / capteurs** : sélecteur des identifiants caméra que Camera2 expose à l’application, avec facing, focale et plus grande taille JPEG annoncée ; écran de capacités détaillées (niveau Camera2, capteur, tailles JPEG/RAW, ISO, exposition, autofocus, flash et stabilisation). CameraX demande la résolution photo la plus élevée disponible, avec repli automatique si le fabricant refuse la combinaison de flux.
 - **Tests JVM** : tests pour le calcul des niveaux d’exposition HDR et le mapping des curseurs.
 
 ## Limites à connaître
 
+- La sélection d’objectif concerne les identifiants caméra que le fabricant expose séparément à Android. Les sous-capteurs physiques d’une caméra logique peuvent rester inaccessibles individuellement.
 - Le HDR et le mode Nuit sont des fusions simples, pas un pipeline professionnel avec alignement multi-échelle, déghosting, estimation de mouvement et calibration de couleurs.
 - Le flou Portrait est un effet de segmentation et de réduction de résolution de fond, pas un mode portrait optique natif du fabricant.
 - L’écran RAW sélectionne parmi les identifiants arrière exposés par Camera2 qui annoncent RAW. **La sélection arbitraire de chaque sous-capteur physique d’un module logique n’est pas garantie** : elle exige que le constructeur expose et autorise ce flux.
