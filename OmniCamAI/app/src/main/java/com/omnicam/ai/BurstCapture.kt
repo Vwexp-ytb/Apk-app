@@ -18,6 +18,7 @@ import java.util.concurrent.Executor
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
+import kotlin.math.roundToInt
 
 /**
  * Small computational burst pipeline. HDR brackets exposure where the device supports EV
