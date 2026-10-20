@@ -1,0 +1,20 @@
+package com.omnicam.ai
+
+import org.junit.Assert.assertEquals
+import org.junit.Test
+
+class CameraMathTest {
+    @Test fun bracketUsesThreeOrderedExposureLevels() {
+        assertEquals(listOf(-6, 0, 6), CameraMath.exposureBracketIndices(0, -12, 12, 1f / 3f))
+    }
+
+    @Test fun bracketClampsToDeviceRange() {
+        assertEquals(listOf(-2, 2, 4), CameraMath.exposureBracketIndices(2, -2, 4, 0.5f))
+    }
+
+    @Test fun sliderClampsProgress() {
+        assertEquals(100L, CameraMath.normalizedSliderValue(-20, 100, 1100))
+        assertEquals(1100L, CameraMath.normalizedSliderValue(1200, 100, 1100))
+        assertEquals(600L, CameraMath.normalizedSliderValue(500, 100, 1100))
+    }
+}
