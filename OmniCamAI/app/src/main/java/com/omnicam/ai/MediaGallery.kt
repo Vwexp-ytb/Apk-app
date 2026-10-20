@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.MediaStore
+import androidx.exifinterface.media.ExifInterface
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -76,6 +77,7 @@ internal fun MediaGalleryScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     var refreshKey by remember { mutableStateOf(0) }
     var selectedForDelete by remember { mutableStateOf<OmniMediaItem?>(null) }
+    var selectedForDetails by remember { mutableStateOf<OmniMediaItem?>(null) }
     val media = remember(refreshKey) { runCatching { queryOmniMedia(context) }.getOrDefault(emptyList()) }
 
     Column(
@@ -103,6 +105,14 @@ internal fun MediaGalleryScreen(onBack: () -> Unit) {
                         )
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedButton(onClick = {
+                                val view = Intent(Intent.ACTION_VIEW).apply {
+                                    setDataAndType(item.uri, item.mimeType)
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                runCatching { context.startActivity(view) }
+                            }) { Text("Ouvrir") }
+                            OutlinedButton(onClick = { selectedForDetails = item }) { Text("Détails") }
+                            OutlinedButton(onClick = {
                                 val send = Intent(Intent.ACTION_SEND).apply {
                                     type = item.mimeType
                                     putExtra(Intent.EXTRA_STREAM, item.uri)
@@ -121,6 +131,36 @@ internal fun MediaGalleryScreen(onBack: () -> Unit) {
             OutlinedButton(onClick = { refreshKey++ }) { Text("Actualiser") }
             Button(onClick = onBack) { Text("Retour") }
         }
+    }
+
+    selectedForDetails?.let { item ->
+        val details = remember(item.uri) {
+            runCatching {
+                context.contentResolver.openInputStream(item.uri)?.use { stream ->
+                    val exif = ExifInterface(stream)
+                    val tags = listOf(
+                        ExifInterface.TAG_DATETIME to "Date EXIF",
+                        ExifInterface.TAG_MAKE to "Fabricant",
+                        ExifInterface.TAG_MODEL to "Modèle",
+                        ExifInterface.TAG_IMAGE_WIDTH to "Largeur",
+                        ExifInterface.TAG_IMAGE_LENGTH to "Hauteur",
+                        ExifInterface.TAG_EXPOSURE_TIME to "Temps de pose",
+                        ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY to "ISO",
+                        ExifInterface.TAG_F_NUMBER to "Ouverture",
+                        ExifInterface.TAG_FOCAL_LENGTH to "Focale"
+                    )
+                    tags.mapNotNull { (tag, label) -> exif.getAttribute(tag)?.let { "$label : $it" } }
+                        .ifEmpty { listOf("Aucune métadonnée EXIF lisible dans ce fichier.") }
+                        .joinToString("\\n")
+                } ?: "Impossible d’ouvrir le fichier."
+            }.getOrElse { "Métadonnées indisponibles : ${it.localizedMessage ?: "erreur de lecture"}" }
+        }
+        AlertDialog(
+            onDismissRequest = { selectedForDetails = null },
+            title = { Text(item.name) },
+            text = { Text("Type : ${item.mimeType}\\nDate du fichier : ${DateFormat.getDateTimeInstance().format(Date(item.dateAdded * 1000))}\\n\\n$details") },
+            confirmButton = { TextButton(onClick = { selectedForDetails = null }) { Text("Fermer") } }
+        )
     }
 
     selectedForDelete?.let { item ->
