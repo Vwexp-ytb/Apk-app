@@ -4,19 +4,22 @@ Application Android native Kotlin / Jetpack Compose, CameraX et Camera2. Projet 
 
 ## Interface
 
-- Écran caméra sobre avec grand aperçu, déclencheur, galerie, vidéo et accès aux paramètres.
+- Écran caméra sobre avec grand aperçu sans titre superposé, déclencheur, galerie intégrée, vidéo et accès rapide au flash et aux paramètres.
 - Écrans séparés Paramètres, Capteurs et IA.
 - Mode Photo, Pro, HDR, Nuit et Portrait.
 - Mise au point tactile, grille, flash/lampe et zoom CameraX lorsqu’il est disponible.
 
 ## Fonctions implémentées dans le code
 
-- **Capture photo** : JPEG vers `Pictures/OmniCam`.
+- **Capture photo** : JPEG/JPG ou PNG vers `Pictures/OmniCam`; le choix DNG ouvre le flux Camera2 RAW. L’écran Pro permet de demander la résolution maximale, HD ou 4K avec repli selon les tailles disponibles.
 - **HDR multi-images** : capture en trois expositions (−2 EV, EV courant, +2 EV lorsque la plage du téléphone le permet), puis fusion tonale. La fusion est volontairement plafonnée à environ 8 MP pour limiter la mémoire sur les capteurs 50/108/200 MP.
 - **Nuit multi-images** : quatre captures avec exposition standard, moyennées pour réduire une partie du bruit. Ce pipeline ne fait pas encore d’alignement optique ; les sujets mobiles peuvent produire des images fantômes.
-- **Portrait** : segmentation du sujet sur l’appareil avec ML Kit Selfie Segmentation et flou d’arrière-plan simplifié ; la photo originale est conservée si le traitement échoue.
+- **Portrait** : segmentation du sujet sur l’appareil avec ML Kit Selfie Segmentation et fond légèrement pixelisé plutôt qu’un flou lisse ; la photo originale est conservée si le traitement échoue.
+- **Mode Pro** : commandes Camera2 pour ISO et temps de pose en aperçu, température de couleur approximative réglable en kelvins, choix du format JPEG/JPG/PNG/DNG et résolution demandée. La disponibilité et le rendu des commandes manuelles dépendent du pilote du téléphone.
 - **RAW / DNG** : écran Camera2 dédié qui ouvre un module arrière exposant `RAW_SENSOR`, enregistre un DNG avec `DngCreator` et permet de régler ISO, temps de pose et distance de mise au point. Les valeurs acceptées dépendent du pilote ; certaines combinaisons de flux peuvent être refusées.
-- **Vidéo** : enregistrement HD sans audio vers `Movies/OmniCam`. Le microphone n’est pas demandé.
+- **Vidéo Pro** : choix de la qualité parmi les résolutions que Camera2 annonce et des fréquences d’images parmi les plages FPS exposées par le capteur ; la caméra peut appliquer un repli si le pilote ne permet pas la combinaison. Enregistrement sans audio vers `Movies/OmniCam`; le microphone n’est pas demandé.
+- **Galerie intégrée** : affiche directement la dernière image dans l’application et évite d’ouvrir un sélecteur d’application externe.
+- **IA désactivable** : l’analyse de scène ML Kit après capture peut être activée ou désactivée dans les paramètres.
 - **IA** : classification de scène locale par ML Kit après capture.
 - **Objectifs / capteurs** : sélecteur des identifiants caméra que Camera2 expose à l’application, avec facing, focale et plus grande taille JPEG annoncée ; écran de capacités détaillées (niveau Camera2, capteur, tailles JPEG/RAW, ISO, exposition, autofocus, flash et stabilisation). CameraX demande la résolution photo la plus élevée disponible, avec repli automatique si le fabricant refuse la combinaison de flux.
 - **Tests JVM** : tests pour le calcul des niveaux d’exposition HDR et le mapping des curseurs.
@@ -25,7 +28,7 @@ Application Android native Kotlin / Jetpack Compose, CameraX et Camera2. Projet 
 
 - La sélection d’objectif concerne les identifiants caméra que le fabricant expose séparément à Android. Les sous-capteurs physiques d’une caméra logique peuvent rester inaccessibles individuellement.
 - Le HDR et le mode Nuit sont des fusions simples, pas un pipeline professionnel avec alignement multi-échelle, déghosting, estimation de mouvement et calibration de couleurs.
-- Le flou Portrait est un effet de segmentation et de réduction de résolution de fond, pas un mode portrait optique natif du fabricant.
+- L’effet Portrait est une segmentation et une pixelisation légère du fond, pas un mode portrait optique natif du fabricant.
 - L’écran RAW sélectionne parmi les identifiants arrière exposés par Camera2 qui annoncent RAW. **La sélection arbitraire de chaque sous-capteur physique d’un module logique n’est pas garantie** : elle exige que le constructeur expose et autorise ce flux.
 - CameraX choisit les flux de photo standards compatibles ; un bouton 200 MP ou une taille annoncée par Camera2 ne garantit pas que le fabricant autorise cette résolution dans la combinaison aperçu/capture. Le pipeline HDR/Nuit est réduit en résolution pour éviter les erreurs mémoire.
 - La vidéo est muette pour le moment. La retouche générative n’est pas implémentée.
