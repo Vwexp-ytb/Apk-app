@@ -7,6 +7,10 @@ on:
       - "OmniCamAI/**"
       - ".github/workflows/build-omnicam.yml"
 
+concurrency:
+  group: omnicam-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
