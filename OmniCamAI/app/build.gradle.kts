@@ -12,12 +12,36 @@ android {
         applicationId = "com.omnicam.ai"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = providers.gradleProperty("APP_VERSION_CODE")
+            .orElse(providers.environmentVariable("GITHUB_RUN_NUMBER"))
+            .orElse("1")
+            .get().toInt()
+        versionName = providers.gradleProperty("APP_VERSION_NAME")
+            .orElse(providers.environmentVariable("APP_VERSION_NAME"))
+            .orElse("0.1.0")
+            .get()
     }
 
     buildFeatures {
         compose = true
+    }
+
+    signingConfigs {
+        create("release") {
+            val keystorePath = System.getenv("ANDROID_KEYSTORE_PATH")
+            if (!keystorePath.isNullOrBlank()) {
+                storeFile = file(keystorePath)
+                storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        getByName("release") {
+            signingConfig = signingConfigs.getByName("release")
+        }
     }
 
     compileOptions {
