@@ -46,10 +46,11 @@ internal object PortraitProcessor {
                 val maskHeight = segmentation.height
                 val mask = FloatArray(maskWidth * maskHeight)
                 maskBuffer.get(mask)
-                val smallW = max(1, bitmap.width / 12)
-                val smallH = max(1, bitmap.height / 12)
-                val small = Bitmap.createScaledBitmap(bitmap, smallW, smallH, true)
-                val blurred = Bitmap.createScaledBitmap(small, bitmap.width, bitmap.height, true)
+                val smallW = max(1, bitmap.width / 9)
+                val smallH = max(1, bitmap.height / 9)
+                // Nearest-neighbour enlargement creates a subtle pixelated background instead of smooth blur.
+                val small = Bitmap.createScaledBitmap(bitmap, smallW, smallH, false)
+                val blurred = Bitmap.createScaledBitmap(small, bitmap.width, bitmap.height, false)
                 if (small !== blurred) small.recycle()
                 val srcPixels = IntArray(bitmap.width * bitmap.height)
                 val bgPixels = IntArray(srcPixels.size)
