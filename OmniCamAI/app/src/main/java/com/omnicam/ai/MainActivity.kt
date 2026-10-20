@@ -24,6 +24,7 @@ import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.camera2.interop.Camera2CameraInfo
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
+import android.hardware.camera2.CaptureRequest
 import android.graphics.ImageFormat
 import androidx.camera.video.FallbackStrategy
 import androidx.camera.video.MediaStoreOutputOptions
@@ -155,6 +156,15 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
     var boundCamera by remember { mutableStateOf<Camera?>(null) }
     var zoomLabel by remember { mutableStateOf("1×") }
     var exposureIndex by remember { mutableStateOf(0) }
+    var outputFormat by remember { mutableStateOf("JPEG") }
+    var aiEnabled by remember { mutableStateOf(true) }
+    var manualControls by remember { mutableStateOf(false) }
+    var manualIso by remember { mutableStateOf(400) }
+    var manualExposureNs by remember { mutableStateOf(10_000_000L) }
+    var whiteBalance by remember { mutableStateOf("Auto") }
+    var videoQuality by remember { mutableStateOf("HD") }
+    var videoFps by remember { mutableStateOf(30) }
+    var photoResolution by remember { mutableStateOf("Maximale") }
     var capabilityText by remember { mutableStateOf("Lecture des capacités caméra…") }
     var aiStatus by remember { mutableStateOf("Les photos sont analysées localement après la capture.") }
     val lensOptions = remember(context) {
@@ -188,7 +198,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
     }
 
     Column(Modifier.fillMaxSize().background(Ink).padding(horizontal = 16.dp)) {
-        Header(page = page, onBack = { page = AppPage.CAMERA }, onSettings = { page = AppPage.SETTINGS })
+        Header(page = page, flashEnabled = flashEnabled, onFlash = { flashEnabled = !flashEnabled }, onBack = { page = AppPage.CAMERA }, onSettings = { page = AppPage.SETTINGS })
         Spacer(Modifier.height(10.dp))
 
         when (page) {
@@ -204,6 +214,13 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                             lifecycleOwner = lifecycleOwner,
                             flashEnabled = flashEnabled,
                             selectedMode = selectedMode,
+                            manualControls = manualControls,
+                            manualIso = manualIso,
+                            manualExposureNs = manualExposureNs,
+                            whiteBalance = whiteBalance,
+                            videoQuality = videoQuality,
+                            videoFps = videoFps,
+                            photoResolution = photoResolution,
                             onCaptureReady = { capture, camera, video ->
                                 imageCapture = capture
                                 videoCapture = video
@@ -221,14 +238,6 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                             modifier = Modifier.fillMaxSize()
                         )
                         if (showGrid) CompositionGrid(Modifier.fillMaxSize())
-                        Text(
-                            "OMNICAM  •  ${selectedMode}",
-                            color = Color.White,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.align(Alignment.TopStart).padding(14.dp)
-                                .clip(RoundedCornerShape(8.dp)).background(Color(0x99090B0E)).padding(horizontal = 10.dp, vertical = 7.dp)
-                        )
                         Row(
                             Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp),
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -271,7 +280,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                                 val capture = imageCapture
                                 if (capture == null) Toast.makeText(context, "Caméra en cours d’initialisation", Toast.LENGTH_SHORT).show()
                                 else if (boundCamera == null) Toast.makeText(context, "Caméra indisponible", Toast.LENGTH_SHORT).show()
-                                else capturePhoto(context, capture, boundCamera!!, selectedMode, cameraExecutor) { summary ->
+                                else if (outputFormat == "DNG") { context.startActivity(Intent(context, RawCaptureActivity::class.java)) } else capturePhoto(context, capture, boundCamera!!, selectedMode, cameraExecutor, outputFormat, aiEnabled) { summary ->
                                     aiStatus = summary
                                     page = AppPage.AI
                                 }
@@ -314,7 +323,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                             }
                         }
                     }
-                    RoundAction(Icons.Default.Settings, "Réglages") { page = AppPage.SETTINGS }
+
                 }
                 Spacer(Modifier.height(8.dp))
                 Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.Center) {
@@ -323,6 +332,22 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                     }
                 }
                 if (selectedMode == "PRO") {
+                    val sensorRange = remember(selectedCameraId, lensFacing) { runCatching { val mgr = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager; val id = selectedCameraId ?: mgr.cameraIdList.firstOrNull { mgr.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) == if (lensFacing == CameraSelector.LENS_FACING_BACK) CameraCharacteristics.LENS_FACING_BACK else CameraCharacteristics.LENS_FACING_FRONT }; id?.let { mgr.getCameraCharacteristics(it).get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE) } }.getOrNull() }
+                    val timeRange = remember(selectedCameraId, lensFacing) { runCatching { val mgr = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager; val id = selectedCameraId ?: mgr.cameraIdList.firstOrNull { mgr.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) == if (lensFacing == CameraSelector.LENS_FACING_BACK) CameraCharacteristics.LENS_FACING_BACK else CameraCharacteristics.LENS_FACING_FRONT }; id?.let { mgr.getCameraCharacteristics(it).get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE) } }.getOrNull() }
+                    Column(Modifier.fillMaxWidth().height(230.dp).verticalScroll(rememberScrollState()).padding(horizontal = 6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text("Contrôle manuel en direct", color = Accent, fontSize = 11.sp); TextButton(onClick = { manualControls = !manualControls }) { Text(if (manualControls) "MANUEL" else "AUTO", color = if (manualControls) Accent else Muted) } }
+                        if (sensorRange != null && sensorRange.upper > sensorRange.lower) { Text("ISO ${manualIso.coerceIn(sensorRange.lower, sensorRange.upper)} · ${sensorRange.lower}–${sensorRange.upper}", color = Color.White, fontSize = 11.sp); Slider(value = manualIso.coerceIn(sensorRange.lower, sensorRange.upper).toFloat(), onValueChange = { manualIso = it.roundToInt(); manualControls = true }, valueRange = sensorRange.lower.toFloat()..sensorRange.upper.toFloat()) }
+                        if (timeRange != null && timeRange.upper > timeRange.lower) { Text("Temps de pose ${(manualExposureNs.coerceIn(timeRange.lower, timeRange.upper) / 1_000_000.0).let { String.format(Locale.US, "%.2f", it) }} ms", color = Color.White, fontSize = 11.sp); Slider(value = manualExposureNs.coerceIn(timeRange.lower, timeRange.upper).toDouble().toFloat(), onValueChange = { manualExposureNs = it.toLong(); manualControls = true }, valueRange = timeRange.lower.toDouble().toFloat()..timeRange.upper.toDouble().toFloat()) }
+                        Text("Balance des blancs / température", color = Color.White, fontSize = 11.sp)
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) { listOf("Auto", "Chaud", "Jour", "Froid").forEach { wb -> TextButton(onClick = { whiteBalance = wb }) { Text(wb, color = if (whiteBalance == wb) Accent else Muted) } } }
+                        Text("Format photo", color = Color.White, fontSize = 11.sp)
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) { listOf("JPEG", "JPG", "PNG", "DNG").forEach { fmt -> TextButton(onClick = { outputFormat = fmt }) { Text(fmt, color = if (outputFormat == fmt) Accent else Muted) } } }
+                        Text("Résolution : $photoResolution", color = Color.White, fontSize = 11.sp)
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) { listOf("Maximale", "HD", "4K*").forEach { res -> TextButton(onClick = { photoResolution = res }) { Text(res, color = if (photoResolution == res) Accent else Muted) } } }
+                        Text("Vidéo Pro · qualité $videoQuality · ${videoFps} fps", color = Color.White, fontSize = 11.sp)
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) { listOf("SD", "HD", "FHD", "UHD").forEach { q -> TextButton(onClick = { videoQuality = q }) { Text(q, color = if (videoQuality == q) Accent else Muted) } } }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) { listOf(24, 30, 60, 120).forEach { fps -> TextButton(onClick = { videoFps = fps }) { Text("$fps fps", color = if (videoFps == fps) Accent else Muted) } } }
+                    }
                     val range = boundCamera?.cameraInfo?.exposureState?.exposureCompensationRange
                     if (range != null && range.lower < range.upper) {
                         Column(Modifier.fillMaxWidth().padding(horizontal = 6.dp)) {
@@ -361,9 +386,10 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                         else permissionLauncher.launch(Manifest.permission.CAMERA)
                     }
                     SettingTile("Capteurs et résolutions", "Inspecter les capacités Camera2", "Ouvrir") { page = AppPage.SENSORS }
-                    SettingTile("Galerie", "Photos enregistrées dans Pictures/OmniCam", "Ouvrir") { openGallery(context) }
+                    SettingTile("Format photo", "Actuel : $outputFormat", "Changer") { outputFormat = when (outputFormat) { "JPEG" -> "PNG"; "PNG" -> "JPG"; "JPG" -> "DNG"; else -> "JPEG" } }
+                    SettingTile("Galerie", "Ouvrir directement la dernière photo", "Ouvrir") { openGallery(context) }
                     SectionTitle("INTELLIGENCE ARTIFICIELLE", "Traitement local sur le téléphone.")
-                    SettingTile("Analyse IA", "Étiquetage d’image ML Kit après capture", "Détails") { page = AppPage.AI }
+                    SettingTile("Analyse IA", if (aiEnabled) "Analyse locale activée après capture" else "Analyse désactivée", if (aiEnabled) "Désactiver" else "Activer") { aiEnabled = !aiEnabled }
                     SettingTile("Mise au point tactile", "Touchez l’aperçu pour faire le point", "Retour caméra") { page = AppPage.CAMERA }
                     Text("Les fonctions non prises en charge par l’API caméra du téléphone ne sont pas activées artificiellement.", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 8.dp))
                 }
@@ -427,18 +453,11 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
 }
 
 @Composable
-private fun Header(page: AppPage, onBack: () -> Unit, onSettings: () -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-        Column {
-            Text("OmniCam", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-            Text(when (page) {
-                AppPage.CAMERA -> "CAMÉRA"
-                AppPage.SETTINGS -> "PARAMÈTRES"
-                AppPage.SENSORS -> "CAPTEURS"
-                AppPage.AI -> "OMNICAM IA"
-            }, color = Muted, fontSize = 10.sp, letterSpacing = 1.5.sp)
-        }
+private fun Header(page: AppPage, flashEnabled: Boolean, onFlash: () -> Unit, onBack: () -> Unit, onSettings: () -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.End) {
         if (page == AppPage.CAMERA) {
+            RoundAction(if (flashEnabled) Icons.Default.FlashOn else Icons.Default.FlashOff, if (flashEnabled) "Flash activé" else "Flash désactivé", onFlash)
+            Spacer(Modifier.width(8.dp))
             RoundAction(Icons.Default.Settings, "Paramètres", onSettings)
         } else {
             RoundAction(Icons.Default.ArrowBack, "Retour", onBack)
@@ -515,6 +534,13 @@ private fun CameraPreview(
     lifecycleOwner: androidx.lifecycle.LifecycleOwner,
     flashEnabled: Boolean,
     selectedMode: String,
+    manualControls: Boolean,
+    manualIso: Int,
+    manualExposureNs: Long,
+    whiteBalance: String,
+    videoQuality: String,
+    videoFps: Int,
+    photoResolution: String,
     onCaptureReady: (ImageCapture, Camera, VideoCapture<Recorder>) -> Unit,
     onTapToFocus: (PreviewView, Offset) -> Unit,
     modifier: Modifier = Modifier
@@ -524,17 +550,26 @@ private fun CameraPreview(
         scaleType = PreviewView.ScaleType.FILL_CENTER
         implementationMode = PreviewView.ImplementationMode.COMPATIBLE
     } }
-    DisposableEffect(lifecycleOwner, lensFacing, selectedCameraId, flashEnabled, selectedMode) {
+    DisposableEffect(lifecycleOwner, lensFacing, selectedCameraId, flashEnabled, selectedMode, manualControls, manualIso, manualExposureNs, whiteBalance, videoQuality, videoFps, photoResolution) {
         val future = ProcessCameraProvider.getInstance(context)
         val listener = Runnable {
             val provider = future.get()
-            val preview = Preview.Builder().build().also { it.surfaceProvider = previewView.surfaceProvider }
+            val previewBuilder = Preview.Builder()
             val captureMode = if (selectedMode == "PRO" || selectedMode == "NUIT" || selectedMode == "HDR") ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY else ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY
-            val highestResolution = ResolutionSelector.Builder()
-                .setResolutionStrategy(ResolutionStrategy.HIGHEST_AVAILABLE_STRATEGY)
-                .build()
-            var capture = ImageCapture.Builder().setCaptureMode(captureMode).setResolutionSelector(highestResolution).build()
-            val recorder = Recorder.Builder().setQualitySelector(QualitySelector.from(Quality.HD, FallbackStrategy.lowerQualityOrHigherThan(Quality.SD))).build()
+            val targetQuality = when (videoQuality) { "SD" -> Quality.SD; "FHD" -> Quality.FHD; "UHD" -> Quality.UHD; else -> Quality.HD }
+            val recorder = Recorder.Builder().setQualitySelector(QualitySelector.from(targetQuality, FallbackStrategy.lowerQualityOrHigherThan(Quality.SD))).build()
+            val highestResolution = ResolutionSelector.Builder().setResolutionStrategy(ResolutionStrategy.HIGHEST_AVAILABLE_STRATEGY).build()
+            val captureBuilder = ImageCapture.Builder().setCaptureMode(captureMode).setResolutionSelector(highestResolution)
+            if (manualControls) {
+                val manualIsoSafe = manualIso.coerceAtLeast(50)
+                val exposureSafe = manualExposureNs.coerceAtLeast(100_000L)
+                runCatching { androidx.camera.camera2.interop.Camera2Interop.Extender(previewBuilder).setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF).setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, manualIsoSafe).setCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME, exposureSafe) }
+                runCatching { androidx.camera.camera2.interop.Camera2Interop.Extender(captureBuilder).setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF).setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, manualIsoSafe).setCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME, exposureSafe) }
+            }
+            val wbMode = when (whiteBalance) { "Chaud" -> CaptureRequest.CONTROL_AWB_MODE_INCANDESCENT; "Jour" -> CaptureRequest.CONTROL_AWB_MODE_DAYLIGHT; "Froid" -> CaptureRequest.CONTROL_AWB_MODE_CLOUDY_DAYLIGHT; else -> CaptureRequest.CONTROL_AWB_MODE_AUTO }
+            runCatching { androidx.camera.camera2.interop.Camera2Interop.Extender(previewBuilder).setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, wbMode) }
+            var capture = captureBuilder.build()
+            val preview = previewBuilder.build().also { it.surfaceProvider = previewView.surfaceProvider }
             val video = VideoCapture.withOutput(recorder)
             val selectorBuilder = CameraSelector.Builder().requireLensFacing(lensFacing)
             if (selectedCameraId != null) {
@@ -573,9 +608,12 @@ private fun capturePhoto(
     camera: Camera,
     mode: String,
     cameraExecutor: ExecutorService,
+    outputFormat: String,
+    aiEnabled: Boolean,
     onAnalysis: (String) -> Unit
 ) {
     fun analyze(uri: android.net.Uri) {
+        if (!aiEnabled) { onAnalysis("Photo enregistrée · analyse IA désactivée"); return }
         try {
             ImageLabeling.getClient(ImageLabelerOptions.DEFAULT_OPTIONS).process(InputImage.fromFilePath(context, uri))
                 .addOnSuccessListener { labels ->
@@ -607,19 +645,29 @@ private fun capturePhoto(
     }
 
     val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+    val wantsPng = outputFormat == "PNG"
     val values = ContentValues().apply {
-        put(MediaStore.MediaColumns.DISPLAY_NAME, "OmniCam_$timestamp.jpg")
-        put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+        put(MediaStore.MediaColumns.DISPLAY_NAME, "OmniCam_$timestamp.${if (wantsPng) "png" else "jpg"}")
+        put(MediaStore.MediaColumns.MIME_TYPE, if (wantsPng) "image/png" else "image/jpeg")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/OmniCam")
     }
     val output = ImageCapture.OutputFileOptions.Builder(context.contentResolver, MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values).build()
     imageCapture.takePicture(output, cameraExecutor, object : ImageCapture.OnImageSavedCallback {
         override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
             android.os.Handler(android.os.Looper.getMainLooper()).post {
-                Toast.makeText(context, "Photo enregistrée dans Pictures/OmniCam", Toast.LENGTH_SHORT).show()
                 val saved = outputFileResults.savedUri
                 if (saved == null) {
                     onAnalysis("Photo enregistrée, mais son URI est indisponible.")
+                } else if (wantsPng) {
+                    try {
+                        val bitmap = context.contentResolver.openInputStream(saved).use { android.graphics.BitmapFactory.decodeStream(it) } ?: error("JPEG temporaire illisible")
+                        val pngValues = ContentValues().apply { put(MediaStore.MediaColumns.DISPLAY_NAME, "OmniCam_$timestamp.png"); put(MediaStore.MediaColumns.MIME_TYPE, "image/png"); if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/OmniCam") }
+                        val pngUri = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, pngValues) ?: error("Création PNG impossible")
+                        context.contentResolver.openOutputStream(pngUri).use { stream -> if (stream == null || !bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, stream)) error("Écriture PNG impossible") }
+                        bitmap.recycle(); context.contentResolver.delete(saved, null, null)
+                        Toast.makeText(context, "PNG enregistré dans Pictures/OmniCam", Toast.LENGTH_SHORT).show()
+                        analyze(pngUri)
+                    } catch (e: Exception) { Toast.makeText(context, "Conversion PNG impossible : ${e.message}", Toast.LENGTH_LONG).show(); analyze(saved) }
                 } else if (mode == "PORTRAIT") {
                     Toast.makeText(context, "Détourage du sujet par IA…", Toast.LENGTH_SHORT).show()
                     PortraitProcessor.process(context, saved) { portraitUri ->
@@ -632,6 +680,7 @@ private fun capturePhoto(
                         }
                     }
                 } else {
+                    Toast.makeText(context, "Photo enregistrée dans Pictures/OmniCam", Toast.LENGTH_SHORT).show()
                     analyze(saved)
                 }
             }
@@ -645,8 +694,13 @@ private fun capturePhoto(
 }
 
 private fun openGallery(context: android.content.Context) {
+    val latest = runCatching {
+        context.contentResolver.query(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, arrayOf(MediaStore.Images.Media._ID), null, null, "${MediaStore.Images.Media.DATE_ADDED} DESC")?.use { cursor ->
+            if (cursor.moveToFirst()) android.content.ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cursor.getLong(0)) else null
+        }
+    }.getOrNull()
     val intent = Intent(Intent.ACTION_VIEW).apply {
-        setDataAndType(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, "image/*")
+        setDataAndType(latest ?: MediaStore.Images.Media.EXTERNAL_CONTENT_URI, "image/*")
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
     runCatching { context.startActivity(intent) }.onFailure {
