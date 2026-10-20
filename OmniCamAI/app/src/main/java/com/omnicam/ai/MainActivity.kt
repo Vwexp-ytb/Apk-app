@@ -251,6 +251,10 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
         selectedMode = preferences.getString("selectedMode", "PHOTO") ?: "PHOTO"
         lensFacing = preferences.getInt("lensFacing", CameraSelector.LENS_FACING_BACK)
         selectedCameraId = preferences.getString("selectedCameraId", null)
+            ?.takeIf { savedId -> lensOptions.any { it.id == savedId } }
+        selectedCameraId?.let { savedId ->
+            lensFacing = lensOptions.firstOrNull { it.id == savedId }?.facing ?: lensFacing
+        }
         showGrid = preferences.getBoolean("showGrid", false)
         flashEnabled = preferences.getBoolean("flashEnabled", false)
         outputFormat = preferences.getString("outputFormat", "JPEG") ?: "JPEG"
