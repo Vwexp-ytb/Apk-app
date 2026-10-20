@@ -151,14 +151,14 @@ internal fun MediaGalleryScreen(onBack: () -> Unit) {
                     )
                     tags.mapNotNull { (tag, label) -> exif.getAttribute(tag)?.let { "$label : $it" } }
                         .ifEmpty { listOf("Aucune métadonnée EXIF lisible dans ce fichier.") }
-                        .joinToString("\\n")
+                        .joinToString("\n")
                 } ?: "Impossible d’ouvrir le fichier."
             }.getOrElse { "Métadonnées indisponibles : ${it.localizedMessage ?: "erreur de lecture"}" }
         }
         AlertDialog(
             onDismissRequest = { selectedForDetails = null },
             title = { Text(item.name) },
-            text = { Text("Type : ${item.mimeType}\\nDate du fichier : ${DateFormat.getDateTimeInstance().format(Date(item.dateAdded * 1000))}\\n\\n$details") },
+            text = { Text("Type : ${item.mimeType}\nDate du fichier : ${DateFormat.getDateTimeInstance().format(Date(item.dateAdded * 1000))}\n\n$details") },
             confirmButton = { TextButton(onClick = { selectedForDetails = null }) { Text("Fermer") } }
         )
     }
