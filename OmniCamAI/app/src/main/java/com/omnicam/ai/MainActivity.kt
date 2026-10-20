@@ -173,6 +173,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
     var activeRecording by remember { mutableStateOf<Recording?>(null) }
     var isRecording by remember { mutableStateOf(false) }
     var boundCamera by remember { mutableStateOf<Camera?>(null) }
+    var previewViewRef by remember { mutableStateOf<PreviewView?>(null) }
     var zoomLabel by remember { mutableStateOf("1×") }
     var exposureIndex by remember { mutableStateOf(0) }
     var outputFormat by remember { mutableStateOf("JPEG") }
@@ -294,6 +295,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                                 boundCamera = camera
                                 exposureIndex = camera.cameraInfo.exposureState.exposureCompensationIndex
                             },
+                            onPreviewReady = { previewViewRef = it },
                             onTapToFocus = { view, point ->
                                 boundCamera?.let { camera ->
                                     val p = view.meteringPointFactory.createPoint(point.x, point.y)
@@ -343,14 +345,13 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                     RoundAction(Icons.Default.PhotoLibrary, "Galerie") { latestPhoto = loadLatestPhotoBitmap(context); page = AppPage.GALLERY }
                     RoundAction(Icons.Default.Tune, "Autofocus central") {
                         val camera = boundCamera
-                        val preview = context as? ComponentActivity
-                        if (camera != null) {
-                            val action = FocusMeteringAction.Builder(androidx.camera.core.MeteringPointFactory { x, y ->
-                                androidx.camera.core.MeteringPoint(x, y, 0.18f)
-                            }.createPoint(0.5f, 0.5f)).setAutoCancelDuration(3, TimeUnit.SECONDS).build()
+                        val view = previewViewRef
+                        if (camera != null && view != null && view.width > 0 && view.height > 0) {
+                            val point = view.meteringPointFactory.createPoint(view.width / 2f, view.height / 2f, 0.18f)
+                            val action = FocusMeteringAction.Builder(point).setAutoCancelDuration(3, TimeUnit.SECONDS).build()
                             camera.cameraControl.startFocusAndMetering(action)
                             Toast.makeText(context, "Autofocus et mesure au centre", Toast.LENGTH_SHORT).show()
-                        }
+                        } else Toast.makeText(context, "Aperçu en cours d’initialisation", Toast.LENGTH_SHORT).show()
                     }
                     Box(
                         Modifier.size(76.dp).clip(CircleShape).background(Color.White).padding(5.dp)
@@ -650,6 +651,7 @@ private fun CameraPreview(
     availableVideoQuality: List<String>,
     photoResolution: String,
     onCaptureReady: (ImageCapture, Camera, VideoCapture<Recorder>) -> Unit,
+    onPreviewReady: (PreviewView) -> Unit,
     onTapToFocus: (PreviewView, Offset) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -658,6 +660,7 @@ private fun CameraPreview(
         scaleType = PreviewView.ScaleType.FILL_CENTER
         implementationMode = PreviewView.ImplementationMode.COMPATIBLE
     } }
+    LaunchedEffect(previewView) { onPreviewReady(previewView) }
     DisposableEffect(lifecycleOwner, lensFacing, selectedCameraId, flashEnabled, selectedMode, videoQuality, videoFps, photoResolution) {
         val future = ProcessCameraProvider.getInstance(context)
         val listener = Runnable {
