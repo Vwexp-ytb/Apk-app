@@ -2,6 +2,7 @@ package com.omnicam.ai
 
 import android.Manifest
 import android.content.ContentValues
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -11,6 +12,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
@@ -65,6 +67,9 @@ import java.util.Date
 import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.label.ImageLabeling
+import com.google.mlkit.vision.label.defaults.ImageLabelerOptions
 
 private val Ink = Color(0xFF090B0E)
 private val Panel = Color(0xFF171A20)
@@ -108,6 +113,7 @@ private fun CameraScreen(cameraExecutor: ExecutorService) {
     var showGrid by remember { mutableStateOf(true) }
     var flashEnabled by remember { mutableStateOf(false) }
     var imageCapture by remember { mutableStateOf<ImageCapture?>(null) }
+    var boundCamera by remember { mutableStateOf<Camera?>(null) }
     var zoomLabel by remember { mutableStateOf("1×") }
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -135,7 +141,8 @@ private fun CameraScreen(cameraExecutor: ExecutorService) {
                     lifecycleOwner = lifecycleOwner,
                     cameraExecutor = cameraExecutor,
                     flashEnabled = flashEnabled,
-                    onCaptureReady = { imageCapture = it },
+                    selectedMode = selectedMode,
+                    onCaptureReady = { capture, camera -> imageCapture = capture; boundCamera = camera },
                     modifier = Modifier.fillMaxSize()
                 )
                 if (showGrid) CompositionGrid(Modifier.fillMaxSize())
@@ -161,7 +168,15 @@ private fun CameraScreen(cameraExecutor: ExecutorService) {
                         Box(
                             modifier = Modifier.size(48.dp).clip(CircleShape)
                                 .background(if (zoomLabel == zoom) Accent else Color(0x99090B0E))
-                                .clickable { zoomLabel = zoom },
+                                .clickable {
+                                    val ratio = zoom.removeSuffix("×").toFloat()
+                                    val state = boundCamera?.cameraInfo?.zoomState?.value
+                                    if (state != null && ratio >= state.minZoomRatio && ratio <= state.maxZoomRatio) {
+                                        boundCamera?.cameraControl?.setZoomRatio(ratio)?.addListener({ zoomLabel = zoom }, ContextCompat.getMainExecutor(context))
+                                    } else {
+                                        Toast.makeText(context, "Grossissement non pris en charge par cet objectif.", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
@@ -204,8 +219,8 @@ private fun CameraScreen(cameraExecutor: ExecutorService) {
                 flashEnabled = !flashEnabled
             }
             ToolButton("Grille", Icons.Default.GridOn, showGrid) { showGrid = !showGrid }
-            ToolButton("Réglages", Icons.Default.Tune, false) {
-                Toast.makeText(context, "Les réglages Pro arrivent dans la prochaine étape.", Toast.LENGTH_SHORT).show()
+            ToolButton("Réglages", Icons.Default.Tune, selectedMode == "PRO") {
+                selectedMode = if (selectedMode == "PRO") "PHOTO" else "PRO"
             }
             ToolButton("Retourner", Icons.Default.FlipCameraAndroid, false) {
                 lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
@@ -237,7 +252,7 @@ private fun CameraScreen(cameraExecutor: ExecutorService) {
             Box(
                 modifier = Modifier.size(54.dp).clip(RoundedCornerShape(16.dp))
                     .background(Panel).clickable {
-                        Toast.makeText(context, "La galerie sera ajoutée à la prochaine étape.", Toast.LENGTH_SHORT).show()
+                        openGallery(context)
                     },
                 contentAlignment = Alignment.Center
             ) {
@@ -370,7 +385,8 @@ private fun CameraPreview(
     lifecycleOwner: androidx.lifecycle.LifecycleOwner,
     cameraExecutor: ExecutorService,
     flashEnabled: Boolean,
-    onCaptureReady: (ImageCapture) -> Unit,
+    selectedMode: String,
+    onCaptureReady: (ImageCapture, Camera) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -379,16 +395,15 @@ private fun CameraPreview(
         implementationMode = PreviewView.ImplementationMode.COMPATIBLE
     } }
 
-    DisposableEffect(lifecycleOwner, lensFacing, flashEnabled) {
+    DisposableEffect(lifecycleOwner, lensFacing, flashEnabled, selectedMode) {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
         val listener = Runnable {
             val provider = cameraProviderFuture.get()
             val preview = Preview.Builder().build().also {
                 it.surfaceProvider = previewView.surfaceProvider
             }
-            val capture = ImageCapture.Builder()
-                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                .build()
+            val captureMode = if (selectedMode == "PRO" || selectedMode == "NUIT") ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY else ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY
+            val capture = ImageCapture.Builder().setCaptureMode(captureMode).build()
             try {
                 provider.unbindAll()
                 val camera = provider.bindToLifecycle(
@@ -398,7 +413,7 @@ private fun CameraPreview(
                     capture
                 )
                 camera.cameraControl.enableTorch(flashEnabled && lensFacing == CameraSelector.LENS_FACING_BACK)
-                onCaptureReady(capture)
+                onCaptureReady(capture, camera)
             } catch (_: Exception) {
                 Toast.makeText(context, "Impossible de démarrer cette caméra", Toast.LENGTH_SHORT).show()
             }
@@ -437,6 +452,19 @@ private fun capturePhoto(
         override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
             android.os.Handler(android.os.Looper.getMainLooper()).post {
                 Toast.makeText(context, "Photo enregistrée dans Pictures/OmniCam", Toast.LENGTH_SHORT).show()
+                outputFileResults.savedUri?.let { uri ->
+                    try {
+                        ImageLabeling.getClient(ImageLabelerOptions.DEFAULT_OPTIONS)
+                            .process(InputImage.fromFilePath(context, uri))
+                            .addOnSuccessListener { labels ->
+                                val summary = labels.sortedByDescending { it.confidence }.take(3)
+                                    .joinToString { label -> label.text + " " + (label.confidence * 100).toInt() + "%" }
+                                if (summary.isNotBlank()) Toast.makeText(context, "OmniCam IA : " + summary, Toast.LENGTH_LONG).show()
+                            }
+                    } catch (_: Exception) {
+                        Toast.makeText(context, "Analyse IA indisponible.", Toast.LENGTH_SHORT).show()
+                    }
+                }
             }
         }
 
@@ -446,4 +474,15 @@ private fun capturePhoto(
             }
         }
     })
+}
+
+ 
+private fun openGallery(context: android.content.Context) {
+    val intent = Intent(Intent.ACTION_VIEW).apply {
+        setDataAndType(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, "image/*")
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    runCatching { context.startActivity(intent) }.onFailure {
+        Toast.makeText(context, "Aucune application galerie disponible.", Toast.LENGTH_SHORT).show()
+    }
 }
