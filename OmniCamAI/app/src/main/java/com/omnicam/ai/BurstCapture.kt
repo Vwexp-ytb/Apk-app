@@ -135,7 +135,17 @@ internal object BurstCapture {
                             red = red / (1.0 + red); green = green / (1.0 + green); blue = blue / (1.0 + blue)
                             red = red.pow(1.0 / 2.2); green = green.pow(1.0 / 2.2); blue = blue.pow(1.0 / 2.2)
                         } else {
-                            red /= n; green /= n; blue /= n
+                            // Night fusion uses a trimmed mean per channel: discard the
+                            // darkest and brightest sample, which are often caused by motion
+                            // or transient noise, then average the middle samples.
+                            val sortedRed = rows.map { ((it[x] shr 16) and 255).toDouble() }.sorted()
+                            val sortedGreen = rows.map { ((it[x] shr 8) and 255).toDouble() }.sorted()
+                            val sortedBlue = rows.map { (it[x] and 255).toDouble() }.sorted()
+                            val firstMiddle = (sortedRed.size - 1) / 2
+                            val secondMiddle = sortedRed.size / 2
+                            red = (sortedRed[firstMiddle] + sortedRed[secondMiddle]) / (2.0 * 255.0)
+                            green = (sortedGreen[firstMiddle] + sortedGreen[secondMiddle]) / (2.0 * 255.0)
+                            blue = (sortedBlue[firstMiddle] + sortedBlue[secondMiddle]) / (2.0 * 255.0)
                         }
                         val r8 = (red * 255).roundToInt().coerceIn(0, 255)
                         val g8 = (green * 255).roundToInt().coerceIn(0, 255)
