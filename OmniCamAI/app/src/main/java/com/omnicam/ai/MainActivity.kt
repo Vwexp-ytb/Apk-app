@@ -20,6 +20,10 @@ import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
+import androidx.camera.camera2.interop.Camera2CameraInfo
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraManager
+import android.graphics.ImageFormat
 import androidx.camera.video.FallbackStrategy
 import androidx.camera.video.MediaStoreOutputOptions
 import androidx.camera.video.Quality
@@ -105,6 +109,7 @@ private val Accent = Color(0xFFC7F36B)
 private val Muted = Color(0xFF9DA3AD)
 
 private enum class AppPage { CAMERA, SETTINGS, SENSORS, AI }
+private data class LensOption(val id: String, val facing: Int, val label: String)
 
 class MainActivity : ComponentActivity() {
     private val cameraExecutor: ExecutorService = Executors.newSingleThreadExecutor()
@@ -138,6 +143,8 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
     }
     var selectedMode by remember { mutableStateOf("PHOTO") }
     var lensFacing by remember { mutableStateOf(CameraSelector.LENS_FACING_BACK) }
+    var selectedCameraId by remember { mutableStateOf<String?>(null) }
+    var showLensDialog by remember { mutableStateOf(false) }
     var showGrid by remember { mutableStateOf(false) }
     var flashEnabled by remember { mutableStateOf(false) }
     var imageCapture by remember { mutableStateOf<ImageCapture?>(null) }
@@ -149,6 +156,24 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
     var exposureIndex by remember { mutableStateOf(0) }
     var capabilityText by remember { mutableStateOf("Lecture des capacités caméra…") }
     var aiStatus by remember { mutableStateOf("Les photos sont analysées localement après la capture.") }
+    val lensOptions = remember(context) {
+        val manager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+        manager.cameraIdList.mapNotNull { id ->
+            runCatching {
+                val chars = manager.getCameraCharacteristics(id)
+                val facing = when (chars.get(CameraCharacteristics.LENS_FACING)) {
+                    CameraCharacteristics.LENS_FACING_BACK -> CameraSelector.LENS_FACING_BACK
+                    CameraCharacteristics.LENS_FACING_FRONT -> CameraSelector.LENS_FACING_FRONT
+                    else -> return@mapNotNull null
+                }
+                val focal = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull()
+                val jpeg = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)?.getOutputSizes(ImageFormat.JPEG)
+                    ?.maxByOrNull { it.width.toLong() * it.height }
+                val mp = jpeg?.let { String.format(Locale.US, "%.1f MP", it.width.toLong() * it.height / 1_000_000.0) } ?: "JPEG n/d"
+                LensOption(id, facing, "ID $id · ${if (facing == CameraSelector.LENS_FACING_BACK) "Arrière" else "Avant"} · ${focal?.let { String.format(Locale.US, "%.1f mm", it) } ?: "focale n/d"} · $mp")
+            }.getOrNull()
+        }
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         hasPermission = granted
@@ -174,6 +199,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                     if (hasPermission) {
                         CameraPreview(
                             lensFacing = lensFacing,
+                            selectedCameraId = selectedCameraId,
                             lifecycleOwner = lifecycleOwner,
                             flashEnabled = flashEnabled,
                             selectedMode = selectedMode,
@@ -324,9 +350,8 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                     }
                     SettingTile("Flash / lampe", if (flashEnabled) "Activé" else "Désactivé", "Basculer") { flashEnabled = !flashEnabled }
                     SettingTile("Grille de composition", if (showGrid) "Visible" else "Masquée", "Basculer") { showGrid = !showGrid }
-                    SettingTile("Caméra active", if (lensFacing == CameraSelector.LENS_FACING_BACK) "Arrière" else "Avant", "Changer d’objectif") {
-                        lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
-                        zoomLabel = "1×"
+                    SettingTile("Caméra active", selectedCameraId?.let { id -> lensOptions.firstOrNull { it.id == id }?.label } ?: if (lensFacing == CameraSelector.LENS_FACING_BACK) "Arrière · automatique" else "Avant · automatique", "Choisir") {
+                        showLensDialog = true
                     }
                     SettingTile("Correction d’exposition", "Réglage EV disponible en mode Pro", "Ouvrir le mode Pro") { selectedMode = "PRO"; page = AppPage.CAMERA }
                     SectionTitle("APPAREIL", "Compatibilité dépendante du constructeur et du capteur.")
@@ -373,7 +398,31 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
         }
     }
 
-
+    if (showLensDialog) {
+        AlertDialog(
+            onDismissRequest = { showLensDialog = false },
+            title = { Text("Choisir un objectif exposé par Android") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    Text("La liste contient les identifiants caméra accessibles à l’application. Les sous-capteurs d’un module logique peuvent ne pas être exposés séparément.", color = Muted, fontSize = 12.sp)
+                    Spacer(Modifier.height(8.dp))
+                    lensOptions.forEach { option ->
+                        TextButton(onClick = {
+                            selectedCameraId = option.id
+                            lensFacing = option.facing
+                            zoomLabel = "1×"
+                            showLensDialog = false
+                        }) { Text(option.label, color = Color.White) }
+                    }
+                    TextButton(onClick = {
+                        selectedCameraId = null
+                        showLensDialog = false
+                    }) { Text("Automatique") }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showLensDialog = false }) { Text("Fermer") } }
+        )
+    }
 }
 
 @Composable
@@ -461,6 +510,7 @@ private fun CompositionGrid(modifier: Modifier = Modifier) {
 @Composable
 private fun CameraPreview(
     lensFacing: Int,
+    selectedCameraId: String?,
     lifecycleOwner: androidx.lifecycle.LifecycleOwner,
     flashEnabled: Boolean,
     selectedMode: String,
@@ -473,7 +523,7 @@ private fun CameraPreview(
         scaleType = PreviewView.ScaleType.FILL_CENTER
         implementationMode = PreviewView.ImplementationMode.COMPATIBLE
     } }
-    DisposableEffect(lifecycleOwner, lensFacing, flashEnabled, selectedMode) {
+    DisposableEffect(lifecycleOwner, lensFacing, selectedCameraId, flashEnabled, selectedMode) {
         val future = ProcessCameraProvider.getInstance(context)
         val listener = Runnable {
             val provider = future.get()
@@ -485,7 +535,13 @@ private fun CameraPreview(
             var capture = ImageCapture.Builder().setCaptureMode(captureMode).setResolutionSelector(highestResolution).build()
             val recorder = Recorder.Builder().setQualitySelector(QualitySelector.from(Quality.HD, FallbackStrategy.lowerQualityOrHigherThan(Quality.SD))).build()
             val video = VideoCapture.withOutput(recorder)
-            val selector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
+            val selectorBuilder = CameraSelector.Builder().requireLensFacing(lensFacing)
+            if (selectedCameraId != null) {
+                selectorBuilder.addCameraFilter { infos ->
+                    infos.filter { info -> runCatching { Camera2CameraInfo.from(info).cameraId == selectedCameraId }.getOrDefault(false) }
+                }
+            }
+            val selector = selectorBuilder.build()
             try {
                 provider.unbindAll()
                 val camera = try {
