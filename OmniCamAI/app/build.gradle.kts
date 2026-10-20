@@ -14,6 +14,7 @@ android {
         targetSdk = 35
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         versionCode = providers.gradleProperty("APP_VERSION_CODE")
+            .orElse(providers.environmentVariable("APP_VERSION_CODE"))
             .orElse(providers.environmentVariable("GITHUB_RUN_NUMBER"))
             .orElse("1")
             .get().toInt()
