@@ -29,6 +29,8 @@ import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.params.RggbChannelVector
 import android.graphics.ImageFormat
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.util.Range
 import android.util.Size
 import androidx.camera.video.FallbackStrategy
@@ -42,6 +44,7 @@ import androidx.camera.video.VideoRecordEvent
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -91,6 +94,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -125,7 +130,7 @@ private fun temperatureGains(kelvin: Int): RggbChannelVector {
     return RggbChannelVector(rGain, 1f, 1f, bGain)
 }
 
-private enum class AppPage { CAMERA, SETTINGS, SENSORS, AI }
+private enum class AppPage { CAMERA, SETTINGS, SENSORS, AI, GALLERY }
 private data class LensOption(val id: String, val facing: Int, val label: String)
 
 class MainActivity : ComponentActivity() {
@@ -182,6 +187,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
     var photoResolution by remember { mutableStateOf("Maximale") }
     var capabilityText by remember { mutableStateOf("Lecture des capacités caméra…") }
     var aiStatus by remember { mutableStateOf("Les photos sont analysées localement après la capture.") }
+    var latestPhoto by remember { mutableStateOf<Bitmap?>(null) }
     val lensOptions = remember(context) {
         val manager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
         manager.cameraIdList.mapNotNull { id ->
@@ -333,7 +339,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                 Spacer(Modifier.height(12.dp))
                 // Minimal shutter strip.
                 Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    RoundAction(Icons.Default.PhotoLibrary, "Galerie") { openGallery(context) }
+                    RoundAction(Icons.Default.PhotoLibrary, "Galerie") { latestPhoto = loadLatestPhotoBitmap(context); page = AppPage.GALLERY }
                     Box(
                         Modifier.size(76.dp).clip(CircleShape).background(Color.White).padding(5.dp)
                             .clip(CircleShape).background(Accent).clickable {
@@ -449,7 +455,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                     }
                     SettingTile("Capteurs et résolutions", "Inspecter les capacités Camera2", "Ouvrir") { page = AppPage.SENSORS }
                     SettingTile("Format photo", "Actuel : $outputFormat", "Changer") { outputFormat = when (outputFormat) { "JPEG" -> "PNG"; "PNG" -> "JPG"; "JPG" -> "DNG"; else -> "JPEG" } }
-                    SettingTile("Galerie", "Ouvrir directement la dernière photo", "Ouvrir") { openGallery(context) }
+                    SettingTile("Galerie", "Afficher la dernière photo dans OmniCam", "Ouvrir") { latestPhoto = loadLatestPhotoBitmap(context); page = AppPage.GALLERY }
                     SectionTitle("INTELLIGENCE ARTIFICIELLE", "Traitement local sur le téléphone.")
                     SettingTile("Analyse IA", if (aiEnabled) "Analyse locale activée après capture" else "Analyse désactivée", if (aiEnabled) "Désactiver" else "Activer") { aiEnabled = !aiEnabled }
                     SettingTile("Mise au point tactile", "Touchez l’aperçu pour faire le point", "Retour caméra") { page = AppPage.CAMERA }
@@ -465,6 +471,18 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                     Text("Remarque : une taille annoncée par Camera2 n’assure pas que le constructeur autorise cette sortie en combinaison avec les autres flux. La sélection explicite d’un objectif physique et le DNG nécessitent des chemins de capture dédiés.", color = Color.White, fontSize = 12.sp, lineHeight = 18.sp)
                     Spacer(Modifier.height(16.dp))
                     ActionRow("Actualiser les capacités", "Relire Camera2") { capabilityText = describeCameraHardware(context) }
+                }
+            }
+            AppPage.GALLERY -> {
+                Column(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Dernière photo", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                    val photo = latestPhoto
+                    if (photo != null) Image(bitmap = photo.asImageBitmap(), contentDescription = "Dernière photo enregistrée", modifier = Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Panel), contentScale = ContentScale.Fit)
+                    else Box(Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Panel), contentAlignment = Alignment.Center) { Text("Aucune photo trouvée dans la galerie.", color = Muted) }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        TextButton(onClick = { latestPhoto = loadLatestPhotoBitmap(context) }) { Text("Actualiser", color = Accent) }
+                        TextButton(onClick = { page = AppPage.CAMERA }) { Text("Retour caméra", color = Accent) }
+                    }
                 }
             }
             AppPage.AI -> {
@@ -763,17 +781,16 @@ private fun capturePhoto(
     })
 }
 
-private fun openGallery(context: android.content.Context) {
-    val latest = runCatching {
-        context.contentResolver.query(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, arrayOf(MediaStore.Images.Media._ID), null, null, "${MediaStore.Images.Media.DATE_ADDED} DESC")?.use { cursor ->
+private fun loadLatestPhotoBitmap(context: android.content.Context): Bitmap? {
+    return runCatching {
+        val uri = context.contentResolver.query(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, arrayOf(MediaStore.Images.Media._ID), null, null, "${MediaStore.Images.Media.DATE_ADDED} DESC")?.use { cursor ->
             if (cursor.moveToFirst()) android.content.ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cursor.getLong(0)) else null
-        }
+        } ?: return null
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+        var sample = 1
+        while (bounds.outWidth / sample > 1600 || bounds.outHeight / sample > 1600) sample *= 2
+        val options = BitmapFactory.Options().apply { inSampleSize = sample.coerceAtLeast(1) }
+        context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
     }.getOrNull()
-    val intent = Intent(Intent.ACTION_VIEW).apply {
-        setDataAndType(latest ?: MediaStore.Images.Media.EXTERNAL_CONTENT_URI, "image/*")
-        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    }
-    runCatching { context.startActivity(intent) }.onFailure {
-        Toast.makeText(context, "Aucune application galerie disponible.", Toast.LENGTH_SHORT).show()
-    }
 }
