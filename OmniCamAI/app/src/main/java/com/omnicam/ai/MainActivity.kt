@@ -341,7 +341,6 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
             }
             return
         }
-        val capture = imageCapture
         if (outputFormat == "DNG") {
             context.startActivity(Intent(context, RawCaptureActivity::class.java))
         } else if (capture == null) {
