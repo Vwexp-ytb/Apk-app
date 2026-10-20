@@ -485,7 +485,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
             AppPage.AI -> {
                 Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     SectionTitle("OMNICAM IA", "Outils disponibles dans cette version.")
-                    SettingTile("Analyse de scène", "Classification locale de la photo après capture", "Ouvrir la galerie") { openGallery(context) }
+                    SettingTile("Analyse de scène", "Classification locale de la photo après capture", "Voir dernière photo") { latestPhoto = loadLatestPhotoBitmap(context); page = AppPage.GALLERY }
                     SettingTile("Dernier résultat", aiStatus, "Réinitialiser") { aiStatus = "Les photos sont analysées localement après la capture." }
                     SettingTile("Mode nuit", "Fusion multi-images pour réduire le bruit", "Activer") { selectedMode = "NUIT"; page = AppPage.CAMERA }
                     SettingTile("Mode portrait", "Détourage du sujet et fond légèrement pixelisé par IA locale", "Activer") { selectedMode = "PORTRAIT"; page = AppPage.CAMERA }
