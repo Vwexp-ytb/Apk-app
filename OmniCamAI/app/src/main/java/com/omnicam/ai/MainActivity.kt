@@ -16,11 +16,13 @@ import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
+import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -56,6 +58,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -151,6 +155,14 @@ private fun CameraScreen(cameraExecutor: ExecutorService) {
                     flashEnabled = flashEnabled,
                     selectedMode = selectedMode,
                     onCaptureReady = { capture, camera -> imageCapture = capture; boundCamera = camera; exposureIndex = camera.cameraInfo.exposureState.exposureCompensationIndex },
+                    onTapToFocus = { view, point ->
+                        val camera = boundCamera
+                        if (camera != null) {
+                            val meterPoint = view.meteringPointFactory.createPoint(point.x, point.y)
+                            val action = FocusMeteringAction.Builder(meterPoint).setAutoCancelDuration(3, java.util.concurrent.TimeUnit.SECONDS).build()
+                            camera.cameraControl.startFocusAndMetering(action)
+                        }
+                    },
                     modifier = Modifier.fillMaxSize()
                 )
                 if (showGrid) CompositionGrid(Modifier.fillMaxSize())
@@ -435,6 +447,7 @@ private fun CameraPreview(
     flashEnabled: Boolean,
     selectedMode: String,
     onCaptureReady: (ImageCapture, Camera) -> Unit,
+    onTapToFocus: (PreviewView, Offset) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -474,7 +487,12 @@ private fun CameraPreview(
         }
     }
 
-    AndroidView(factory = { previewView }, modifier = modifier)
+    AndroidView(
+        factory = { previewView },
+        modifier = modifier.pointerInput(previewView) {
+            detectTapGestures { point -> onTapToFocus(previewView, point) }
+        }
+    )
 }
 
 private fun capturePhoto(
