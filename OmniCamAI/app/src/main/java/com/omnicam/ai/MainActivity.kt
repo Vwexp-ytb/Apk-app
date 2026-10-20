@@ -31,7 +31,6 @@ import android.hardware.camera2.params.RggbChannelVector
 import android.graphics.ImageFormat
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.util.Range
 import android.util.Size
 import androidx.camera.video.FallbackStrategy
 import androidx.camera.video.MediaStoreOutputOptions
@@ -231,6 +230,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
         }.getOrDefault(listOf("SD"))
     }
     LaunchedEffect(availableVideoQuality) { if (videoQuality !in availableVideoQuality) videoQuality = availableVideoQuality.last() }
+    LaunchedEffect(availableVideoFps) { if (videoFps !in availableVideoFps) videoFps = availableVideoFps.minByOrNull { kotlin.math.abs(it - 30) } ?: 30 }
 
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         hasPermission = granted
@@ -278,10 +278,6 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                             lifecycleOwner = lifecycleOwner,
                             flashEnabled = flashEnabled,
                             selectedMode = selectedMode,
-                            manualControls = manualControls,
-                            manualIso = manualIso,
-                            manualExposureNs = manualExposureNs,
-                            temperatureKelvin = temperatureKelvin,
                             videoQuality = videoQuality,
                             videoFps = videoFps,
                             availableVideoFps = availableVideoFps,
@@ -492,7 +488,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                     SettingTile("Analyse de scène", "Classification locale de la photo après capture", "Ouvrir la galerie") { openGallery(context) }
                     SettingTile("Dernier résultat", aiStatus, "Réinitialiser") { aiStatus = "Les photos sont analysées localement après la capture." }
                     SettingTile("Mode nuit", "Fusion multi-images pour réduire le bruit", "Activer") { selectedMode = "NUIT"; page = AppPage.CAMERA }
-                    SettingTile("Mode portrait", "Détourage du sujet et flou de fond par IA locale", "Activer") { selectedMode = "PORTRAIT"; page = AppPage.CAMERA }
+                    SettingTile("Mode portrait", "Détourage du sujet et fond légèrement pixelisé par IA locale", "Activer") { selectedMode = "PORTRAIT"; page = AppPage.CAMERA }
                     Text("HDR et mode nuit fusionnent plusieurs images. Le mode portrait segmente le sujet et applique un arrière-plan légèrement pixelisé. L’analyse de scène est désactivable dans les paramètres.", color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
                 }
             }
@@ -615,10 +611,6 @@ private fun CameraPreview(
     lifecycleOwner: androidx.lifecycle.LifecycleOwner,
     flashEnabled: Boolean,
     selectedMode: String,
-    manualControls: Boolean,
-    manualIso: Int,
-    manualExposureNs: Long,
-    temperatureKelvin: Int,
     videoQuality: String,
     videoFps: Int,
     availableVideoFps: List<Int>,
@@ -761,7 +753,7 @@ private fun capturePhoto(
                     Toast.makeText(context, "Détourage du sujet par IA…", Toast.LENGTH_SHORT).show()
                     PortraitProcessor.process(context, saved) { portraitUri ->
                         if (portraitUri != null) {
-                            Toast.makeText(context, "Portrait avec flou d’arrière-plan enregistré", Toast.LENGTH_LONG).show()
+                            Toast.makeText(context, "Portrait avec fond pixelisé enregistré", Toast.LENGTH_LONG).show()
                             analyze(portraitUri)
                         } else {
                             Toast.makeText(context, "Détourage indisponible ; photo originale conservée.", Toast.LENGTH_LONG).show()
