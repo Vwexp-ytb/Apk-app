@@ -305,8 +305,10 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                     ) {
                         if (isRecording) {
                             activeRecording?.stop()
+                            boundCamera?.cameraControl?.enableTorch(false)
                             isRecording = false
                         } else {
+                            boundCamera?.cameraControl?.enableTorch(flashEnabled)
                             val recorder = videoCapture
                             if (recorder == null) {
                                 Toast.makeText(context, "Vidéo indisponible sur cette caméra.", Toast.LENGTH_SHORT).show()
@@ -386,7 +388,6 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                         page = AppPage.CAMERA
                         Toast.makeText(context, "Choisissez le mode dans la barre sous le déclencheur.", Toast.LENGTH_SHORT).show()
                     }
-                    SettingTile("Flash / lampe", if (flashEnabled) "Activé" else "Désactivé", "Basculer") { flashEnabled = !flashEnabled }
                     SettingTile("Grille de composition", if (showGrid) "Visible" else "Masquée", "Basculer") { showGrid = !showGrid }
                     SettingTile("Caméra active", selectedCameraId?.let { id -> lensOptions.firstOrNull { it.id == id }?.label } ?: if (lensFacing == CameraSelector.LENS_FACING_BACK) "Arrière · automatique" else "Avant · automatique", "Choisir") {
                         showLensDialog = true
@@ -595,6 +596,8 @@ private fun CameraPreview(
             }
             val wbMode = when (whiteBalance) { "Chaud" -> CaptureRequest.CONTROL_AWB_MODE_INCANDESCENT; "Jour" -> CaptureRequest.CONTROL_AWB_MODE_DAYLIGHT; "Froid" -> CaptureRequest.CONTROL_AWB_MODE_CLOUDY_DAYLIGHT; else -> CaptureRequest.CONTROL_AWB_MODE_AUTO }
             runCatching { androidx.camera.camera2.interop.Camera2Interop.Extender(previewBuilder).setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, wbMode) }
+            runCatching { androidx.camera.camera2.interop.Camera2Interop.Extender(captureBuilder).setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, wbMode) }
+            runCatching { androidx.camera.camera2.interop.Camera2Interop.Extender(videoBuilder).setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, wbMode) }
             var capture = captureBuilder.build()
             val preview = previewBuilder.build().also { it.surfaceProvider = previewView.surfaceProvider }
             val selectorBuilder = CameraSelector.Builder().requireLensFacing(lensFacing)
@@ -614,7 +617,8 @@ private fun CameraPreview(
                     capture = ImageCapture.Builder().setCaptureMode(captureMode).build()
                     provider.bindToLifecycle(lifecycleOwner, selector, preview, capture, video)
                 }
-                camera.cameraControl.enableTorch(flashEnabled && lensFacing == CameraSelector.LENS_FACING_BACK)
+                capture.flashMode = if (flashEnabled && lensFacing == CameraSelector.LENS_FACING_BACK) ImageCapture.FLASH_MODE_ON else ImageCapture.FLASH_MODE_OFF
+                camera.cameraControl.enableTorch(false)
                 onCaptureReady(capture, camera, video)
             } catch (_: Exception) {
                 Toast.makeText(context, "Impossible de démarrer cette caméra", Toast.LENGTH_SHORT).show()
