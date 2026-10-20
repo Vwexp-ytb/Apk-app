@@ -18,6 +18,8 @@ import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.video.FallbackStrategy
 import androidx.camera.video.MediaStoreOutputOptions
 import androidx.camera.video.Quality
@@ -476,13 +478,24 @@ private fun CameraPreview(
         val listener = Runnable {
             val provider = future.get()
             val preview = Preview.Builder().build().also { it.surfaceProvider = previewView.surfaceProvider }
-            val captureMode = if (selectedMode == "PRO" || selectedMode == "NUIT") ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY else ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY
-            val capture = ImageCapture.Builder().setCaptureMode(captureMode).build()
+            val captureMode = if (selectedMode == "PRO" || selectedMode == "NUIT" || selectedMode == "HDR") ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY else ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY
+            val highestResolution = ResolutionSelector.Builder()
+                .setResolutionStrategy(ResolutionStrategy.HIGHEST_AVAILABLE_STRATEGY)
+                .build()
+            var capture = ImageCapture.Builder().setCaptureMode(captureMode).setResolutionSelector(highestResolution).build()
             val recorder = Recorder.Builder().setQualitySelector(QualitySelector.from(Quality.HD, FallbackStrategy.lowerQualityOrHigherThan(Quality.SD))).build()
             val video = VideoCapture.withOutput(recorder)
+            val selector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
             try {
                 provider.unbindAll()
-                val camera = provider.bindToLifecycle(lifecycleOwner, CameraSelector.Builder().requireLensFacing(lensFacing).build(), preview, capture, video)
+                val camera = try {
+                    provider.bindToLifecycle(lifecycleOwner, selector, preview, capture, video)
+                } catch (_: Exception) {
+                    // Some HALs cannot combine their maximum still size with preview + video; fall back safely.
+                    provider.unbindAll()
+                    capture = ImageCapture.Builder().setCaptureMode(captureMode).build()
+                    provider.bindToLifecycle(lifecycleOwner, selector, preview, capture, video)
+                }
                 camera.cameraControl.enableTorch(flashEnabled && lensFacing == CameraSelector.LENS_FACING_BACK)
                 onCaptureReady(capture, camera, video)
             } catch (_: Exception) {
