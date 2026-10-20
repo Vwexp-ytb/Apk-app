@@ -22,6 +22,7 @@ import androidx.camera.core.Preview
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.camera2.interop.Camera2CameraInfo
+import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.camera2.interop.Camera2CameraControl
 import androidx.camera.camera2.interop.CaptureRequestOptions
 import android.hardware.camera2.CameraCharacteristics
@@ -154,6 +155,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalCamera2Interop::class)
 @Composable
 private fun OmniCamApp(cameraExecutor: ExecutorService) {
     val context = LocalContext.current
