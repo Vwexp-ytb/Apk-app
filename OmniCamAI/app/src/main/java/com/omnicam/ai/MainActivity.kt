@@ -188,6 +188,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
     var videoFps by remember { mutableStateOf(30) }
     var photoResolution by remember { mutableStateOf("Maximale") }
     var timerSeconds by remember { mutableStateOf(0) }
+    var burstCount by remember { mutableStateOf(1) }
     var capabilityText by remember { mutableStateOf("Lecture des capacités caméra…") }
     var aiStatus by remember { mutableStateOf("Les photos sont analysées localement après la capture.") }
     var latestPhoto by remember { mutableStateOf<Bitmap?>(null) }
@@ -262,6 +263,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
         videoFps = preferences.getInt("videoFps", 30)
         photoResolution = preferences.getString("photoResolution", "Maximale") ?: "Maximale"
         timerSeconds = preferences.getInt("timerSeconds", 0)
+        burstCount = preferences.getInt("burstCount", 1)
         showPortraitControls = preferences.getBoolean("showPortraitControls", true)
         portraitPixelSize = preferences.getInt("portraitPixelSize", 14)
         portraitShape = preferences.getString("portraitShape", "Carré") ?: "Carré"
@@ -273,7 +275,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
     LaunchedEffect(
         preferencesLoaded, selectedMode, lensFacing, selectedCameraId, showGrid, flashEnabled,
         outputFormat, aiEnabled, manualControls, manualIso, manualExposureNs, temperatureKelvin,
-        videoQuality, videoFps, photoResolution, timerSeconds, showPortraitControls, portraitPixelSize,
+        videoQuality, videoFps, photoResolution, timerSeconds, burstCount, showPortraitControls, portraitPixelSize,
         portraitShape, portraitEdgeSoftness, portraitMosaicSmoothing
     ) {
         if (preferencesLoaded) preferences.edit()
@@ -292,6 +294,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
             .putInt("videoFps", videoFps)
             .putString("photoResolution", photoResolution)
             .putInt("timerSeconds", timerSeconds)
+            .putInt("burstCount", burstCount)
             .putBoolean("showPortraitControls", showPortraitControls)
             .putInt("portraitPixelSize", portraitPixelSize)
             .putString("portraitShape", portraitShape)
@@ -322,6 +325,22 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
     }
 
     fun performPhotoCapture() {
+        val capture = imageCapture
+        if (burstCount > 1 && selectedMode == "PHOTO" && (outputFormat == "JPEG" || outputFormat == "JPG")) {
+            if (capture == null) {
+                Toast.makeText(context, "Caméra en cours d’initialisation", Toast.LENGTH_SHORT).show()
+            } else {
+                PhotoBurst.capture(
+                    context, capture, cameraExecutor, burstCount,
+                    onComplete = { uris ->
+                        Toast.makeText(context, "Rafale terminée : ${uris.size} photo(s)", Toast.LENGTH_LONG).show()
+                        latestPhoto = loadLatestPhotoBitmap(context)
+                    },
+                    onError = { message -> Toast.makeText(context, message, Toast.LENGTH_LONG).show() }
+                )
+            }
+            return
+        }
         val capture = imageCapture
         if (outputFormat == "DNG") {
             context.startActivity(Intent(context, RawCaptureActivity::class.java))
@@ -536,6 +555,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                     SettingTile("Capteurs et résolutions", "Inspecter les capacités Camera2", "Ouvrir") { page = AppPage.SENSORS }
                     SettingTile("Format photo", "Actuel : $outputFormat", "Changer") { outputFormat = when (outputFormat) { "JPEG" -> "PNG"; "PNG" -> "JPG"; "JPG" -> "DNG"; else -> "JPEG" } }
                     SettingTile("Retardateur photo", if (timerSeconds == 0) "Désactivé" else "$timerSeconds secondes", "Changer") { timerSeconds = when (timerSeconds) { 0 -> 3; 3 -> 10; else -> 0 } }
+                    SettingTile("Rafale photo", if (burstCount == 1) "Une photo" else "$burstCount photos · JPEG en mode Photo", "Changer") { burstCount = when (burstCount) { 1 -> 3; 3 -> 5; else -> 1 } }
                     SettingTile("Galerie", "Afficher la dernière photo dans OmniCam", "Ouvrir") { latestPhoto = loadLatestPhotoBitmap(context); page = AppPage.GALLERY }
                     SectionTitle("INTELLIGENCE ARTIFICIELLE", "Traitement local sur le téléphone.")
                     SettingTile("Analyse IA", if (aiEnabled) "Analyse locale activée après capture" else "Analyse désactivée", if (aiEnabled) "Désactiver" else "Activer") { aiEnabled = !aiEnabled }
