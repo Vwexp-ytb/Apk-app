@@ -242,6 +242,25 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                         ModeLabel(mode, selectedMode == mode) { selectedMode = mode }
                     }
                 }
+                if (selectedMode == "PRO") {
+                    val range = boundCamera?.cameraInfo?.exposureState?.exposureCompensationRange
+                    if (range != null && range.lower < range.upper) {
+                        Column(Modifier.fillMaxWidth().padding(horizontal = 6.dp)) {
+                            Text("Exposition  ·  EV $exposureIndex", color = Accent, fontSize = 11.sp)
+                            Slider(
+                                value = exposureIndex.toFloat().coerceIn(range.lower.toFloat(), range.upper.toFloat()),
+                                onValueChange = { value ->
+                                    exposureIndex = value.roundToInt()
+                                    boundCamera?.cameraControl?.setExposureCompensationIndex(exposureIndex)
+                                },
+                                valueRange = range.lower.toFloat()..range.upper.toFloat(),
+                                steps = (range.upper - range.lower - 1).coerceAtLeast(0)
+                            )
+                        }
+                    } else {
+                        Text("Correction EV non prise en charge", color = Muted, fontSize = 10.sp)
+                    }
+                }
             }
             AppPage.SETTINGS -> {
                 Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -256,7 +275,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                         lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
                         zoomLabel = "1×"
                     }
-                    SettingTile("Correction d’exposition", "EV $exposureIndex", "Ajuster") { page = AppPage.AI }
+                    SettingTile("Correction d’exposition", "Réglage EV disponible en mode Pro", "Ouvrir le mode Pro") { selectedMode = "PRO"; page = AppPage.CAMERA }
                     SectionTitle("APPAREIL", "Compatibilité dépendante du constructeur et du capteur.")
                     SettingTile("Capteurs et résolutions", "Inspecter les capacités Camera2", "Ouvrir") { page = AppPage.SENSORS }
                     SettingTile("Galerie", "Photos enregistrées dans Pictures/OmniCam", "Ouvrir") { openGallery(context) }
@@ -297,30 +316,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
         }
     }
 
-    if (page == AppPage.SETTINGS && selectedMode == "PRO") {
-        val range = boundCamera?.cameraInfo?.exposureState?.exposureCompensationRange
-        if (range != null && range.lower < range.upper) {
-            AlertDialog(
-                onDismissRequest = {},
-                title = { Text("Correction d’exposition") },
-                text = {
-                    Column {
-                        Text("EV $exposureIndex")
-                        Slider(
-                            value = exposureIndex.toFloat().coerceIn(range.lower.toFloat(), range.upper.toFloat()),
-                            onValueChange = { value ->
-                                exposureIndex = value.roundToInt()
-                                boundCamera?.cameraControl?.setExposureCompensationIndex(exposureIndex)
-                            },
-                            valueRange = range.lower.toFloat()..range.upper.toFloat(),
-                            steps = (range.upper - range.lower - 1).coerceAtLeast(0)
-                        )
-                    }
-                },
-                confirmButton = { TextButton(onClick = { page = AppPage.CAMERA }) { Text("Terminé") } }
-            )
-        }
-    }
+
 }
 
 @Composable
