@@ -26,6 +26,8 @@ import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureRequest
 import android.graphics.ImageFormat
+import android.util.Range
+import android.util.Size
 import androidx.camera.video.FallbackStrategy
 import androidx.camera.video.MediaStoreOutputOptions
 import androidx.camera.video.Quality
@@ -186,6 +188,16 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
         }
     }
 
+    val availableVideoFps = remember(selectedCameraId, lensFacing) {
+        runCatching {
+            val manager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+            val id = selectedCameraId ?: manager.cameraIdList.firstOrNull { manager.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) == if (lensFacing == CameraSelector.LENS_FACING_BACK) CameraCharacteristics.LENS_FACING_BACK else CameraCharacteristics.LENS_FACING_FRONT }
+            val ranges = id?.let { manager.getCameraCharacteristics(it).get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)?.toList() }.orEmpty()
+            val standard = ranges.flatMap { range -> listOf(24, 30, 60, 120).filter { it >= range.lower && it <= range.upper } }.distinct().sorted()
+            if (standard.isNotEmpty()) standard else ranges.map { it.upper }.distinct().sorted().ifEmpty { listOf(30) }
+        }.getOrDefault(listOf(30))
+    }
+
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         hasPermission = granted
         if (!granted) Toast.makeText(context, "L’autorisation caméra est nécessaire pour photographier.", Toast.LENGTH_LONG).show()
@@ -220,6 +232,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                             whiteBalance = whiteBalance,
                             videoQuality = videoQuality,
                             videoFps = videoFps,
+                            availableVideoFps = availableVideoFps,
                             photoResolution = photoResolution,
                             onCaptureReady = { capture, camera, video ->
                                 imageCapture = capture
@@ -343,10 +356,10 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                         Text("Format photo", color = Color.White, fontSize = 11.sp)
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) { listOf("JPEG", "JPG", "PNG", "DNG").forEach { fmt -> TextButton(onClick = { outputFormat = fmt }) { Text(fmt, color = if (outputFormat == fmt) Accent else Muted) } } }
                         Text("Résolution : $photoResolution", color = Color.White, fontSize = 11.sp)
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) { listOf("Maximale", "HD", "4K*").forEach { res -> TextButton(onClick = { photoResolution = res }) { Text(res, color = if (photoResolution == res) Accent else Muted) } } }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) { listOf("Maximale", "HD", "4K").forEach { res -> TextButton(onClick = { photoResolution = res }) { Text(res, color = if (photoResolution == res) Accent else Muted) } } }
                         Text("Vidéo Pro · qualité $videoQuality · ${videoFps} fps", color = Color.White, fontSize = 11.sp)
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) { listOf("SD", "HD", "FHD", "UHD").forEach { q -> TextButton(onClick = { videoQuality = q }) { Text(q, color = if (videoQuality == q) Accent else Muted) } } }
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) { listOf(24, 30, 60, 120).forEach { fps -> TextButton(onClick = { videoFps = fps }) { Text("$fps fps", color = if (videoFps == fps) Accent else Muted) } } }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) { availableVideoFps.forEach { fps -> TextButton(onClick = { videoFps = fps }) { Text("$fps fps", color = if (videoFps == fps) Accent else Muted) } } }
                     }
                     val range = boundCamera?.cameraInfo?.exposureState?.exposureCompensationRange
                     if (range != null && range.lower < range.upper) {
@@ -540,6 +553,7 @@ private fun CameraPreview(
     whiteBalance: String,
     videoQuality: String,
     videoFps: Int,
+    availableVideoFps: List<Int>,
     photoResolution: String,
     onCaptureReady: (ImageCapture, Camera, VideoCapture<Recorder>) -> Unit,
     onTapToFocus: (PreviewView, Offset) -> Unit,
@@ -558,7 +572,16 @@ private fun CameraPreview(
             val captureMode = if (selectedMode == "PRO" || selectedMode == "NUIT" || selectedMode == "HDR") ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY else ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY
             val targetQuality = when (videoQuality) { "SD" -> Quality.SD; "FHD" -> Quality.FHD; "UHD" -> Quality.UHD; else -> Quality.HD }
             val recorder = Recorder.Builder().setQualitySelector(QualitySelector.from(targetQuality, FallbackStrategy.lowerQualityOrHigherThan(Quality.SD))).build()
-            val highestResolution = ResolutionSelector.Builder().setResolutionStrategy(ResolutionStrategy.HIGHEST_AVAILABLE_STRATEGY).build()
+            val fpsRange = (availableVideoFps.ifEmpty { listOf(30) }).minByOrNull { kotlin.math.abs(it - videoFps) } ?: 30
+            val videoBuilder = VideoCapture.Builder<Recorder>().setVideoOutput(recorder)
+            runCatching { videoBuilder.setTargetFrameRate(Range(fpsRange, fpsRange)) }
+            val video = videoBuilder.build()
+            val resolutionStrategy = when (photoResolution) {
+                "HD" -> ResolutionStrategy(Size(1280, 720), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER)
+                "4K" -> ResolutionStrategy(Size(3840, 2160), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER)
+                else -> ResolutionStrategy.HIGHEST_AVAILABLE_STRATEGY
+            }
+            val highestResolution = ResolutionSelector.Builder().setResolutionStrategy(resolutionStrategy).build()
             val captureBuilder = ImageCapture.Builder().setCaptureMode(captureMode).setResolutionSelector(highestResolution)
             if (manualControls) {
                 val manualIsoSafe = manualIso.coerceAtLeast(50)
@@ -570,7 +593,6 @@ private fun CameraPreview(
             runCatching { androidx.camera.camera2.interop.Camera2Interop.Extender(previewBuilder).setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, wbMode) }
             var capture = captureBuilder.build()
             val preview = previewBuilder.build().also { it.surfaceProvider = previewView.surfaceProvider }
-            val video = VideoCapture.withOutput(recorder)
             val selectorBuilder = CameraSelector.Builder().requireLensFacing(lensFacing)
             if (selectedCameraId != null) {
                 selectorBuilder.addCameraFilter { infos ->
