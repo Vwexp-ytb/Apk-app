@@ -97,7 +97,7 @@ internal object BurstCapture {
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeFile(file.absolutePath, bounds)
             var sample = 1
-            while ((bounds.outWidth.toLong() / sample) * (bounds.outHeight.toLong() / sample) > 16_000_000L) sample *= 2
+            while ((bounds.outWidth.toLong() / sample) * (bounds.outHeight.toLong() / sample) > 8_000_000L) sample *= 2
             val options = BitmapFactory.Options().apply { inSampleSize = sample.coerceAtLeast(1); inPreferredConfig = Bitmap.Config.ARGB_8888 }
             BitmapFactory.decodeFile(file.absolutePath, options) ?: error("JPEG illisible")
         }
@@ -106,40 +106,45 @@ internal object BurstCapture {
             val height = bitmaps.minOf { it.height }
             val scaled = bitmaps.map { if (it.width == width && it.height == height) it else Bitmap.createScaledBitmap(it, width, height, true) }
             try {
-                val pixels = IntArray(width * height)
-                val source = scaled.map { bitmap -> IntArray(width * height).also { bitmap.getPixels(it, 0, width, 0, 0, width, height) } }
-                for (p in pixels.indices) {
-                    var red = 0.0
-                    var green = 0.0
-                    var blue = 0.0
-                    for (frame in source.indices) {
-                        val color = source[frame][p]
-                        var r = ((color shr 16) and 255) / 255.0
-                        var g = ((color shr 8) and 255) / 255.0
-                        var b = (color and 255) / 255.0
-                        if (hdr) {
-                            val ev = when (frame) { 0 -> -2.0; source.lastIndex -> 2.0; else -> 0.0 }
-                            val scale = 2.0.pow(-ev)
-                            r = (r.pow(2.2) * scale).coerceAtMost(4.0)
-                            g = (g.pow(2.2) * scale).coerceAtMost(4.0)
-                            b = (b.pow(2.2) * scale).coerceAtMost(4.0)
+                val output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                val rows = scaled.map { IntArray(width) }
+                val outRow = IntArray(width)
+                for (y in 0 until height) {
+                    scaled.forEachIndexed { index, bitmap -> bitmap.getPixels(rows[index], 0, width, 0, y, width, 1) }
+                    for (x in 0 until width) {
+                        var red = 0.0
+                        var green = 0.0
+                        var blue = 0.0
+                        for (frame in rows.indices) {
+                            val color = rows[frame][x]
+                            var r = ((color shr 16) and 255) / 255.0
+                            var g = ((color shr 8) and 255) / 255.0
+                            var b = (color and 255) / 255.0
+                            if (hdr) {
+                                val ev = when (frame) { 0 -> -2.0; rows.lastIndex -> 2.0; else -> 0.0 }
+                                val scale = 2.0.pow(-ev)
+                                r = (r.pow(2.2) * scale).coerceAtMost(4.0)
+                                g = (g.pow(2.2) * scale).coerceAtMost(4.0)
+                                b = (b.pow(2.2) * scale).coerceAtMost(4.0)
+                            }
+                            red += r; green += g; blue += b
                         }
-                        red += r; green += g; blue += b
+                        val n = rows.size.toDouble()
+                        if (hdr) {
+                            red = red / n; green = green / n; blue = blue / n
+                            red = red / (1.0 + red); green = green / (1.0 + green); blue = blue / (1.0 + blue)
+                            red = red.pow(1.0 / 2.2); green = green.pow(1.0 / 2.2); blue = blue.pow(1.0 / 2.2)
+                        } else {
+                            red /= n; green /= n; blue /= n
+                        }
+                        val r8 = (red * 255).roundToInt().coerceIn(0, 255)
+                        val g8 = (green * 255).roundToInt().coerceIn(0, 255)
+                        val b8 = (blue * 255).roundToInt().coerceIn(0, 255)
+                        outRow[x] = (0xFF shl 24) or (r8 shl 16) or (g8 shl 8) or b8
                     }
-                    val n = source.size.toDouble()
-                    if (hdr) {
-                        red = red / n; green = green / n; blue = blue / n
-                        red = red / (1.0 + red); green = green / (1.0 + green); blue = blue / (1.0 + blue)
-                        red = red.pow(1.0 / 2.2); green = green.pow(1.0 / 2.2); blue = blue.pow(1.0 / 2.2)
-                    } else {
-                        red /= n; green /= n; blue /= n
-                    }
-                    val r8 = (red * 255).roundToInt().coerceIn(0, 255)
-                    val g8 = (green * 255).roundToInt().coerceIn(0, 255)
-                    val b8 = (blue * 255).roundToInt().coerceIn(0, 255)
-                    pixels[p] = (0xFF shl 24) or (r8 shl 16) or (g8 shl 8) or b8
+                    output.setPixels(outRow, 0, width, 0, y, width, 1)
                 }
-                return Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).apply { setPixels(pixels, 0, width, 0, 0, width, height) }
+                return output
             } finally {
                 scaled.forEachIndexed { index, bitmap -> if (bitmap !== bitmaps[index]) bitmap.recycle() }
             }
