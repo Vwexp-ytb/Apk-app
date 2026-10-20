@@ -199,10 +199,20 @@ class RawCaptureActivity : Activity() {
             val raw = rawSize ?: run { status.text = "RAW_SENSOR indisponible"; return }
             val c = characteristics
             val isoRange = c?.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
-            if (isoRange != null) selectedIso = selectedIso.coerceIn(isoRange.lower, isoRange.upper)
+            if (isoRange != null) {
+                selectedIso = selectedIso.coerceIn(isoRange.lower, isoRange.upper)
+                if (isoRange.upper > isoRange.lower) isoSeek.progress = (selectedIso - isoRange.lower) * 1000 / (isoRange.upper - isoRange.lower)
+            }
             isoLabel.text = "ISO manuel : $selectedIso (${isoRange?.lower ?: "?"}–${isoRange?.upper ?: "?"})"
             val exposureRange = c?.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
+            if (exposureRange != null) {
+                selectedExposureNs = selectedExposureNs.coerceIn(exposureRange.lower, exposureRange.upper)
+                if (exposureRange.upper > exposureRange.lower) exposureSeek.progress = (((selectedExposureNs - exposureRange.lower) * 1000) / (exposureRange.upper - exposureRange.lower)).toInt()
+            }
             exposureLabel.text = "Temps de pose : ${selectedExposureNs / 1_000_000} ms"
+            val maxFocus = c?.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0f
+            selectedFocus = selectedFocus.coerceIn(0f, maxFocus)
+            if (maxFocus > 0f) focusSeek.progress = (selectedFocus / maxFocus * 1000f).toInt()
             focusLabel.text = "Mise au point : ${String.format(Locale.US, "%.2f", selectedFocus)} dioptries"
             imageReader?.close()
             imageReader = ImageReader.newInstance(raw.width, raw.height, ImageFormat.RAW_SENSOR, 2).also { reader ->
