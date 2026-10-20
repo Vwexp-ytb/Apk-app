@@ -8,6 +8,7 @@
         android:label="OmniCam AI"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <activity android:name=".RawCaptureActivity" android:exported="false" android:screenOrientation="fullSensor" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
