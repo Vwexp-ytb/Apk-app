@@ -18,6 +18,14 @@ import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview
+import androidx.camera.video.FallbackStrategy
+import androidx.camera.video.MediaStoreOutputOptions
+import androidx.camera.video.Quality
+import androidx.camera.video.QualitySelector
+import androidx.camera.video.Recorder
+import androidx.camera.video.Recording
+import androidx.camera.video.VideoCapture
+import androidx.camera.video.VideoRecordEvent
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
@@ -49,6 +57,8 @@ import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.StopCircle
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -129,6 +139,9 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
     var showGrid by remember { mutableStateOf(false) }
     var flashEnabled by remember { mutableStateOf(false) }
     var imageCapture by remember { mutableStateOf<ImageCapture?>(null) }
+    var videoCapture by remember { mutableStateOf<VideoCapture<Recorder>?>(null) }
+    var activeRecording by remember { mutableStateOf<Recording?>(null) }
+    var isRecording by remember { mutableStateOf(false) }
     var boundCamera by remember { mutableStateOf<Camera?>(null) }
     var zoomLabel by remember { mutableStateOf("1×") }
     var exposureIndex by remember { mutableStateOf(0) }
@@ -162,8 +175,9 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                             lifecycleOwner = lifecycleOwner,
                             flashEnabled = flashEnabled,
                             selectedMode = selectedMode,
-                            onCaptureReady = { capture, camera ->
+                            onCaptureReady = { capture, camera, video ->
                                 imageCapture = capture
+                                videoCapture = video
                                 boundCamera = camera
                                 exposureIndex = camera.cameraInfo.exposureState.exposureCompensationIndex
                             },
@@ -235,6 +249,42 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                             },
                         contentAlignment = Alignment.Center
                     ) { Icon(Icons.Default.CameraAlt, contentDescription = "Prendre une photo", tint = Ink, modifier = Modifier.size(28.dp)) }
+                    RoundAction(
+                        if (isRecording) Icons.Default.StopCircle else Icons.Default.Videocam,
+                        if (isRecording) "Arrêter" else "Vidéo"
+                    ) {
+                        if (isRecording) {
+                            activeRecording?.stop()
+                            isRecording = false
+                        } else {
+                            val recorder = videoCapture
+                            if (recorder == null) {
+                                Toast.makeText(context, "Vidéo indisponible sur cette caméra.", Toast.LENGTH_SHORT).show()
+                            } else {
+                                val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                                val values = ContentValues().apply {
+                                    put(MediaStore.MediaColumns.DISPLAY_NAME, "OmniCam_${stamp}.mp4")
+                                    put(MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/OmniCam")
+                                }
+                                val options = MediaStoreOutputOptions.Builder(context.contentResolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI)
+                                    .setContentValues(values).build()
+                                activeRecording = recorder.output.prepareRecording(context, options)
+                                    .start(ContextCompat.getMainExecutor(context)) { event ->
+                                        if (event is VideoRecordEvent.Finalize) {
+                                            activeRecording = null
+                                            isRecording = false
+                                            if (event.error == VideoRecordEvent.Finalize.ERROR_NONE) {
+                                                Toast.makeText(context, "Vidéo enregistrée dans Movies/OmniCam", Toast.LENGTH_LONG).show()
+                                            } else {
+                                                Toast.makeText(context, "Échec vidéo : ${event.error}", Toast.LENGTH_LONG).show()
+                                            }
+                                        }
+                                    }
+                                isRecording = true
+                            }
+                        }
+                    }
                     RoundAction(Icons.Default.Settings, "Réglages") { page = AppPage.SETTINGS }
                 }
                 Spacer(Modifier.height(8.dp))
@@ -408,7 +458,7 @@ private fun CameraPreview(
     lifecycleOwner: androidx.lifecycle.LifecycleOwner,
     flashEnabled: Boolean,
     selectedMode: String,
-    onCaptureReady: (ImageCapture, Camera) -> Unit,
+    onCaptureReady: (ImageCapture, Camera, VideoCapture<Recorder>) -> Unit,
     onTapToFocus: (PreviewView, Offset) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -424,11 +474,13 @@ private fun CameraPreview(
             val preview = Preview.Builder().build().also { it.surfaceProvider = previewView.surfaceProvider }
             val captureMode = if (selectedMode == "PRO" || selectedMode == "NUIT") ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY else ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY
             val capture = ImageCapture.Builder().setCaptureMode(captureMode).build()
+            val recorder = Recorder.Builder().setQualitySelector(QualitySelector.from(Quality.HD, FallbackStrategy.lowerQualityOrHigherThan(Quality.SD))).build()
+            val video = VideoCapture.withOutput(recorder)
             try {
                 provider.unbindAll()
-                val camera = provider.bindToLifecycle(lifecycleOwner, CameraSelector.Builder().requireLensFacing(lensFacing).build(), preview, capture)
+                val camera = provider.bindToLifecycle(lifecycleOwner, CameraSelector.Builder().requireLensFacing(lensFacing).build(), preview, capture, video)
                 camera.cameraControl.enableTorch(flashEnabled && lensFacing == CameraSelector.LENS_FACING_BACK)
-                onCaptureReady(capture, camera)
+                onCaptureReady(capture, camera, video)
             } catch (_: Exception) {
                 Toast.makeText(context, "Impossible de démarrer cette caméra", Toast.LENGTH_SHORT).show()
             }
