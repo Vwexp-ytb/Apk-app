@@ -43,6 +43,7 @@ jobs:
             fi
           done
           echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/omnicam-release.jks"
+          keytool -list -keystore "$RUNNER_TEMP/omnicam-release.jks" -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" >/dev/null
           echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/omnicam-release.jks" >> "$GITHUB_ENV"
 
       - name: Choose version
@@ -76,6 +77,13 @@ jobs:
           APP_VERSION_NAME: ${{ steps.version.outputs.name }}
           APP_VERSION_CODE: ${{ github.run_number }}
         run: gradle :app:assembleRelease --no-daemon
+
+      - name: Verify APK signature
+        run: |
+          APK="OmniCamAI/app/build/outputs/apk/release/app-release.apk"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          test -n "$APKSIGNER"
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
 
       - name: Rename release APK
         run: cp OmniCamAI/app/build/outputs/apk/release/app-release.apk "${{ steps.version.outputs.apk_name }}"
