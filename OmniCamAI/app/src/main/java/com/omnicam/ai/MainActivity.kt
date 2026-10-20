@@ -227,7 +227,8 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                             .clip(CircleShape).background(Accent).clickable {
                                 val capture = imageCapture
                                 if (capture == null) Toast.makeText(context, "Caméra en cours d’initialisation", Toast.LENGTH_SHORT).show()
-                                else capturePhoto(context, capture, cameraExecutor) { summary ->
+                                else if (boundCamera == null) Toast.makeText(context, "Caméra indisponible", Toast.LENGTH_SHORT).show()
+                                else capturePhoto(context, capture, boundCamera!!, selectedMode, cameraExecutor) { summary ->
                                     aiStatus = summary
                                     page = AppPage.AI
                                 }
@@ -238,7 +239,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                 }
                 Spacer(Modifier.height(8.dp))
                 Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.Center) {
-                    listOf("NUIT", "PORTRAIT", "PHOTO", "PRO").forEach { mode ->
+                    listOf("HDR", "NUIT", "PORTRAIT", "PHOTO", "PRO").forEach { mode ->
                         ModeLabel(mode, selectedMode == mode) { selectedMode = mode }
                     }
                 }
@@ -443,9 +444,42 @@ private fun CameraPreview(
 private fun capturePhoto(
     context: android.content.Context,
     imageCapture: ImageCapture,
+    camera: Camera,
+    mode: String,
     cameraExecutor: ExecutorService,
     onAnalysis: (String) -> Unit
 ) {
+    fun analyze(uri: android.net.Uri) {
+        try {
+            ImageLabeling.getClient(ImageLabelerOptions.DEFAULT_OPTIONS).process(InputImage.fromFilePath(context, uri))
+                .addOnSuccessListener { labels ->
+                    val summary = labels.sortedByDescending { it.confidence }.take(3)
+                        .joinToString { it.text + " " + (it.confidence * 100).toInt() + "%" }
+                    val message = if (summary.isBlank()) "Aucun objet reconnu sur la dernière photo." else "Résultat : $summary"
+                    Toast.makeText(context, "OmniCam IA : $summary", Toast.LENGTH_LONG).show()
+                    onAnalysis(message)
+                }
+                .addOnFailureListener { onAnalysis("Photo enregistrée, mais l’analyse IA a échoué.") }
+        } catch (_: Exception) { onAnalysis("Photo enregistrée. Analyse IA indisponible.") }
+    }
+
+    if (mode == "HDR" || mode == "NUIT") {
+        Toast.makeText(context, if (mode == "HDR") "Capture HDR multi-images…" else "Rafale nuit : réduction du bruit…", Toast.LENGTH_SHORT).show()
+        BurstCapture.capture(
+            context = context,
+            imageCapture = imageCapture,
+            camera = camera,
+            mode = mode,
+            ioExecutor = cameraExecutor,
+            onComplete = { uri ->
+                Toast.makeText(context, if (mode == "HDR") "Fusion HDR enregistrée" else "Fusion nuit enregistrée", Toast.LENGTH_SHORT).show()
+                analyze(uri)
+            },
+            onError = { message -> Toast.makeText(context, message, Toast.LENGTH_LONG).show() }
+        )
+        return
+    }
+
     val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
     val values = ContentValues().apply {
         put(MediaStore.MediaColumns.DISPLAY_NAME, "OmniCam_$timestamp.jpg")
@@ -457,19 +491,7 @@ private fun capturePhoto(
         override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
             android.os.Handler(android.os.Looper.getMainLooper()).post {
                 Toast.makeText(context, "Photo enregistrée dans Pictures/OmniCam", Toast.LENGTH_SHORT).show()
-                val uri = outputFileResults.savedUri
-                if (uri == null) { onAnalysis("Photo enregistrée. Analyse IA indisponible pour cette URI."); return@post }
-                try {
-                    ImageLabeling.getClient(ImageLabelerOptions.DEFAULT_OPTIONS).process(InputImage.fromFilePath(context, uri))
-                        .addOnSuccessListener { labels ->
-                            val summary = labels.sortedByDescending { it.confidence }.take(3)
-                                .joinToString { it.text + " " + (it.confidence * 100).toInt() + "%" }
-                            val message = if (summary.isBlank()) "Aucun objet reconnu sur la dernière photo." else "Résultat : $summary"
-                            Toast.makeText(context, "OmniCam IA : $summary", Toast.LENGTH_LONG).show()
-                            onAnalysis(message)
-                        }
-                        .addOnFailureListener { onAnalysis("Photo enregistrée, mais l’analyse IA a échoué.") }
-                } catch (_: Exception) { onAnalysis("Photo enregistrée. Analyse IA indisponible.") }
+                outputFileResults.savedUri?.let(::analyze) ?: onAnalysis("Photo enregistrée, mais son URI est indisponible.")
             }
         }
         override fun onError(exception: ImageCaptureException) {
