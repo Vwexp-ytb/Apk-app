@@ -22,11 +22,25 @@ jobs:
       - name: Run unit tests
         run: gradle :app:testDebugUnitTest --no-daemon
         working-directory: OmniCamAI
+      - name: Lint Android project
+        run: gradle :app:lintDebug --no-daemon
+        working-directory: OmniCamAI
       - name: Build debug APK
         run: gradle :app:assembleDebug --no-daemon
         working-directory: OmniCamAI
-      - name: Upload APK
+      - name: Build release candidate (unsigned in CI)
+        run: gradle :app:assembleRelease --no-daemon
+        working-directory: OmniCamAI
+      - name: Export dependency inventory
+        run: gradle :app:dependencies --configuration releaseRuntimeClasspath --no-daemon > dependencies-release.txt
+        working-directory: OmniCamAI
+      - name: Upload build and dependency reports
         uses: actions/upload-artifact@v4
         with:
-          name: OmniCamAI-debug
-          path: OmniCamAI/app/build/outputs/apk/debug/app-debug.apk
+          name: OmniCamAI-ci-candidates
+          path: |
+            OmniCamAI/app/build/outputs/apk/debug/app-debug.apk
+            OmniCamAI/app/build/outputs/apk/release/app-release-unsigned.apk
+            OmniCamAI/app/build/reports/lint-results-debug.html
+            OmniCamAI/dependencies-release.txt
+          if-no-files-found: error
