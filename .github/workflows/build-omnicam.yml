@@ -25,6 +25,29 @@ jobs:
       - name: Lint Android project
         run: gradle :app:lintDebug --no-daemon
         working-directory: OmniCamAI
+      - name: Print lint findings for review
+        if: always()
+        working-directory: OmniCamAI
+        run: |
+          python3 - <<'PY'
+          import os
+          import xml.etree.ElementTree as ET
+          path = "app/build/reports/lint-results-debug.xml"
+          if not os.path.exists(path):
+              print("No lint XML report was generated.")
+              raise SystemExit(0)
+          root = ET.parse(path).getroot()
+          issues = root.findall(".//issue")
+          print(f"Lint findings: {len(issues)}")
+          for issue in issues:
+              location = issue.find("location")
+              where = ""
+              if location is not None:
+                  file = location.get("file", "")
+                  line = location.find("line")
+                  where = f"{file}:{line.get('line') if line is not None else '?'}"
+              print(f"{issue.get('severity','?')} [{issue.get('id','?')}] {where}: {issue.get('message','')}")
+          PY
       - name: Upload lint report even when lint fails
         if: always()
         uses: actions/upload-artifact@v4
