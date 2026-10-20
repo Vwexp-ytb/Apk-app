@@ -1,6 +1,8 @@
 package com.omnicam.ai
 
 import android.app.Activity
+import android.Manifest
+import android.content.pm.PackageManager
 import android.content.ContentValues
 import android.content.Context
 import android.graphics.ImageFormat
@@ -187,6 +189,11 @@ class RawCaptureActivity : Activity() {
     }
 
     private fun openCamera() {
+        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            status.text = "Autorisation caméra nécessaire pour le mode RAW."
+            requestPermissions(arrayOf(Manifest.permission.CAMERA), 702)
+            return
+        }
         if (cameraIds.isEmpty() || cameraDevice != null) return
         val id = cameraIds.getOrNull(cameraSpinner.selectedItemPosition) ?: return
         try {
@@ -235,6 +242,16 @@ class RawCaptureActivity : Activity() {
             }, handler)
         } catch (e: Exception) {
             status.text = "Ouverture RAW impossible : ${e.localizedMessage ?: e.javaClass.simpleName}"
+        }
+    }
+
+    @Deprecated("Deprecated in Android API; retained for minSdk compatibility")
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 702 && grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED && texture.isAvailable) {
+            openCamera()
+        } else if (requestCode == 702) {
+            status.text = "Autorisation caméra refusée : le mode RAW est indisponible."
         }
     }
 
