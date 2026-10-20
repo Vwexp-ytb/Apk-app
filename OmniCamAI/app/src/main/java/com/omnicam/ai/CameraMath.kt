@@ -8,7 +8,8 @@ internal object CameraMath {
         require(lower <= upper) { "Invalid exposure compensation range" }
         val step = stepEv.takeIf { it > 0f } ?: 1f
         val offset = (2f / step).roundToInt()
-        return listOf((current - offset).coerceIn(lower, upper), current.coerceIn(lower, upper), (current + offset).coerceIn(lower, upper))
+        val center = current.coerceIn(lower, upper)
+        return listOf((center - offset).coerceIn(lower, upper), center, (center + offset).coerceIn(lower, upper))
     }
 
     fun normalizedSliderValue(progress: Int, lower: Long, upper: Long): Long {
