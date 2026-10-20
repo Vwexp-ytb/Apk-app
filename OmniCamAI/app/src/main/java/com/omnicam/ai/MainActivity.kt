@@ -328,6 +328,10 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                     }
                     SettingTile("Correction d’exposition", "Réglage EV disponible en mode Pro", "Ouvrir le mode Pro") { selectedMode = "PRO"; page = AppPage.CAMERA }
                     SectionTitle("APPAREIL", "Compatibilité dépendante du constructeur et du capteur.")
+                    SettingTile("RAW / DNG et réglages manuels", "Capture Camera2 RAW avec ISO, temps de pose et mise au point", "Ouvrir") {
+                        if (hasPermission) context.startActivity(Intent(context, RawCaptureActivity::class.java))
+                        else permissionLauncher.launch(Manifest.permission.CAMERA)
+                    }
                     SettingTile("Capteurs et résolutions", "Inspecter les capacités Camera2", "Ouvrir") { page = AppPage.SENSORS }
                     SettingTile("Galerie", "Photos enregistrées dans Pictures/OmniCam", "Ouvrir") { openGallery(context) }
                     SectionTitle("INTELLIGENCE ARTIFICIELLE", "Traitement local sur le téléphone.")
