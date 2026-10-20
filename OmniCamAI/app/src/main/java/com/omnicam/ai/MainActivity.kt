@@ -591,7 +591,7 @@ private fun CameraPreview(
             val targetQuality = when (videoQuality) { "SD" -> Quality.SD; "FHD" -> Quality.FHD; "UHD" -> Quality.UHD; else -> Quality.HD }
             val recorder = Recorder.Builder().setQualitySelector(QualitySelector.from(targetQuality, FallbackStrategy.lowerQualityOrHigherThan(Quality.SD))).build()
             val fpsRange = (availableVideoFps.ifEmpty { listOf(30) }).minByOrNull { kotlin.math.abs(it - videoFps) } ?: 30
-            val videoBuilder = VideoCapture.Builder<Recorder>().setVideoOutput(recorder)
+            val videoBuilder = VideoCapture.Builder(recorder)
             val supportedRange = runCatching {
                 val manager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
                 val id = selectedCameraId ?: manager.cameraIdList.firstOrNull { manager.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) == if (lensFacing == CameraSelector.LENS_FACING_BACK) CameraCharacteristics.LENS_FACING_BACK else CameraCharacteristics.LENS_FACING_FRONT }
