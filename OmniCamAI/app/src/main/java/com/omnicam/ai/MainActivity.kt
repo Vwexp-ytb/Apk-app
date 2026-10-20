@@ -129,7 +129,7 @@ private fun temperatureGains(kelvin: Int): RggbChannelVector {
     return RggbChannelVector(rGain, 1f, 1f, bGain)
 }
 
-private enum class AppPage { CAMERA, SETTINGS, SENSORS, AI, GALLERY }
+private enum class AppPage { CAMERA, SETTINGS, SENSORS, AI, GALLERY, PRIVACY, ABOUT }
 private data class LensOption(val id: String, val facing: Int, val label: String)
 
 class MainActivity : ComponentActivity() {
@@ -159,6 +159,8 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var page by remember { mutableStateOf(AppPage.CAMERA) }
+    var preferencesLoaded by remember { mutableStateOf(false) }
+    val preferences = remember(context) { context.getSharedPreferences("omnicam_preferences", Context.MODE_PRIVATE) }
     var hasPermission by remember {
         mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
     }
@@ -243,7 +245,56 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
         if (!granted) Toast.makeText(context, "L’autorisation caméra est nécessaire pour photographier.", Toast.LENGTH_LONG).show()
     }
     LaunchedEffect(Unit) {
+        // Restore preferences before saving values, so defaults never overwrite saved settings.
+        selectedMode = preferences.getString("selectedMode", "PHOTO") ?: "PHOTO"
+        lensFacing = preferences.getInt("lensFacing", CameraSelector.LENS_FACING_BACK)
+        selectedCameraId = preferences.getString("selectedCameraId", null)
+        showGrid = preferences.getBoolean("showGrid", false)
+        flashEnabled = preferences.getBoolean("flashEnabled", false)
+        outputFormat = preferences.getString("outputFormat", "JPEG") ?: "JPEG"
+        aiEnabled = preferences.getBoolean("aiEnabled", true)
+        manualControls = preferences.getBoolean("manualControls", false)
+        manualIso = preferences.getInt("manualIso", 400)
+        manualExposureNs = preferences.getLong("manualExposureNs", 10_000_000L)
+        temperatureKelvin = preferences.getInt("temperatureKelvin", 5500)
+        videoQuality = preferences.getString("videoQuality", "HD") ?: "HD"
+        videoFps = preferences.getInt("videoFps", 30)
+        photoResolution = preferences.getString("photoResolution", "Maximale") ?: "Maximale"
+        showPortraitControls = preferences.getBoolean("showPortraitControls", true)
+        portraitPixelSize = preferences.getInt("portraitPixelSize", 14)
+        portraitShape = preferences.getString("portraitShape", "Carré") ?: "Carré"
+        portraitEdgeSoftness = preferences.getInt("portraitEdgeSoftness", 58)
+        portraitMosaicSmoothing = preferences.getInt("portraitMosaicSmoothing", 42)
+        preferencesLoaded = true
         if (!hasPermission) permissionLauncher.launch(Manifest.permission.CAMERA)
+    }
+    LaunchedEffect(
+        preferencesLoaded, selectedMode, lensFacing, selectedCameraId, showGrid, flashEnabled,
+        outputFormat, aiEnabled, manualControls, manualIso, manualExposureNs, temperatureKelvin,
+        videoQuality, videoFps, photoResolution, showPortraitControls, portraitPixelSize,
+        portraitShape, portraitEdgeSoftness, portraitMosaicSmoothing
+    ) {
+        if (preferencesLoaded) preferences.edit()
+            .putString("selectedMode", selectedMode)
+            .putInt("lensFacing", lensFacing)
+            .putString("selectedCameraId", selectedCameraId)
+            .putBoolean("showGrid", showGrid)
+            .putBoolean("flashEnabled", flashEnabled)
+            .putString("outputFormat", outputFormat)
+            .putBoolean("aiEnabled", aiEnabled)
+            .putBoolean("manualControls", manualControls)
+            .putInt("manualIso", manualIso)
+            .putLong("manualExposureNs", manualExposureNs)
+            .putInt("temperatureKelvin", temperatureKelvin)
+            .putString("videoQuality", videoQuality)
+            .putInt("videoFps", videoFps)
+            .putString("photoResolution", photoResolution)
+            .putBoolean("showPortraitControls", showPortraitControls)
+            .putInt("portraitPixelSize", portraitPixelSize)
+            .putString("portraitShape", portraitShape)
+            .putInt("portraitEdgeSoftness", portraitEdgeSoftness)
+            .putInt("portraitMosaicSmoothing", portraitMosaicSmoothing)
+            .apply()
     }
     LaunchedEffect(page) {
         if (page == AppPage.SENSORS) capabilityText = describeCameraHardware(context)
@@ -490,6 +541,9 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                             Text("Le lissage adoucit les cellules et les contours sans supprimer le détourage du sujet.", color = Muted, fontSize = 11.sp, lineHeight = 15.sp)
                         }
                     }
+                    SectionTitle("PRODUCTION", "Informations de transparence et version de l’application.")
+                    SettingTile("Confidentialité", "Permissions, stockage et traitement IA", "Consulter") { page = AppPage.PRIVACY }
+                    SettingTile("À propos d’OmniCam AI", "Version, appareil et informations d’assistance", "Consulter") { page = AppPage.ABOUT }
                     Text("Les fonctions non prises en charge par l’API caméra du téléphone ne sont pas activées artificiellement.", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 8.dp))
                 }
             }
@@ -502,6 +556,30 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                     Text("Remarque : une taille annoncée par Camera2 n’assure pas que le constructeur autorise cette sortie en combinaison avec les autres flux. La sélection explicite d’un objectif physique et le DNG nécessitent des chemins de capture dédiés.", color = Color.White, fontSize = 12.sp, lineHeight = 18.sp)
                     Spacer(Modifier.height(16.dp))
                     ActionRow("Actualiser les capacités", "Relire Camera2") { capabilityText = describeCameraHardware(context) }
+                }
+            }
+            AppPage.PRIVACY -> {
+                Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    SectionTitle("CONFIDENTIALITÉ", "Informations sur les données utilisées par cette version.")
+                    Text("Caméra : l’autorisation caméra est nécessaire pour afficher l’aperçu et prendre des photos ou vidéos. Vous pouvez la retirer à tout moment dans les paramètres Android.", color = Color.White, fontSize = 13.sp, lineHeight = 19.sp)
+                    Text("Traitement IA : l’analyse de scène et la segmentation portrait utilisent les bibliothèques ML Kit dans l’application. Le code actuel ne déclare pas la permission INTERNET et ne contient pas de SDK d’analyse/traçage ; les traitements d’image décrits sont réalisés sur l’appareil.", color = Color.White, fontSize = 13.sp, lineHeight = 19.sp)
+                    Text("Stockage : les photos et vidéos que vous prenez sont enregistrées dans la bibliothèque multimédia Android, dans les dossiers Pictures/OmniCam et Movies/OmniCam. Les fichiers peuvent contenir des métadonnées EXIF selon le chemin de capture utilisé.", color = Color.White, fontSize = 13.sp, lineHeight = 19.sp)
+                    Text("Partage : si vous partagez un fichier depuis Android, le destinataire et l’application choisie peuvent recevoir ce fichier et ses métadonnées. Vérifiez les métadonnées avant de publier une photo.", color = Color.White, fontSize = 13.sp, lineHeight = 19.sp)
+                    Text("Contact et suppression : les fichiers peuvent être supprimés depuis la galerie du téléphone. L’adresse de contact du responsable doit être publiée avant toute diffusion commerciale ; elle n’est pas encore configurée dans cette version.", color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
+                    Text("Cette page est un résumé intégré, pas un avis juridique ni la politique publique définitive requise pour une publication sur une boutique.", color = Accent, fontSize = 12.sp, lineHeight = 18.sp)
+                    TextButton(onClick = { page = AppPage.SETTINGS }) { Text("Retour aux paramètres", color = Accent) }
+                }
+            }
+            AppPage.ABOUT -> {
+                Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    SectionTitle("À PROPOS", "Informations techniques utiles au support.")
+                    Text("OmniCam AI", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                    Text("Version : ${runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() ?: "inconnue"}", color = Color.White, fontSize = 13.sp)
+                    Text("Android : ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})", color = Color.White, fontSize = 13.sp)
+                    Text("Appareil : ${Build.MANUFACTURER} ${Build.MODEL}", color = Color.White, fontSize = 13.sp)
+                    Text("Les fonctions caméra varient selon les pilotes, les capteurs et les versions Android. Un rapport de compatibilité peut inclure ces informations techniques, mais ne doit jamais inclure de photos privées ni de secrets.", color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
+                    Text("Support : adresse à configurer avant publication.", color = Accent, fontSize = 12.sp)
+                    TextButton(onClick = { page = AppPage.SETTINGS }) { Text("Retour aux paramètres", color = Accent) }
                 }
             }
             AppPage.GALLERY -> {
