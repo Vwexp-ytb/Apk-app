@@ -35,16 +35,22 @@ fun describeCameraHardware(context: Context): String {
             val focal = c.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
                 ?.joinToString { "%.1f mm".format(java.util.Locale.US, it) } ?: "Non communiqué"
             val afModes = c.get(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES)
-                ?.mapNotNull {
-                    when (it) {
+                ?.filter { mode ->
+                    mode == CameraCharacteristics.CONTROL_AF_MODE_OFF ||
+                        mode == CameraCharacteristics.CONTROL_AF_MODE_AUTO ||
+                        mode == CameraCharacteristics.CONTROL_AF_MODE_CONTINUOUS_PICTURE ||
+                        mode == CameraCharacteristics.CONTROL_AF_MODE_CONTINUOUS_VIDEO ||
+                        mode == CameraCharacteristics.CONTROL_AF_MODE_EDOF
+                }?.distinct()?.joinToString { mode ->
+                    when (mode) {
                         CameraCharacteristics.CONTROL_AF_MODE_OFF -> "manuel"
                         CameraCharacteristics.CONTROL_AF_MODE_AUTO -> "autofocus"
                         CameraCharacteristics.CONTROL_AF_MODE_CONTINUOUS_PICTURE -> "AF photo continu"
                         CameraCharacteristics.CONTROL_AF_MODE_CONTINUOUS_VIDEO -> "AF vidéo continu"
                         CameraCharacteristics.CONTROL_AF_MODE_EDOF -> "EDOF"
-                        else -> null
+                        else -> "autre"
                     }
-                }?.distinct()?.joinToString() ?: "Non communiqué"
+                } ?: "Non communiqué"
             val exposure = c.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
             val iso = c.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
             val level = when (c.get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL)) {
