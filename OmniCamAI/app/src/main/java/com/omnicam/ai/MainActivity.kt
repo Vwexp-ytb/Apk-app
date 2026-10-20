@@ -2,6 +2,7 @@ package com.omnicam.ai
 
 import android.Manifest
 import android.content.ContentValues
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
