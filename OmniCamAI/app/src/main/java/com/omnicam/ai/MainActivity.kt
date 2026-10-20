@@ -22,9 +22,12 @@ import androidx.camera.core.Preview
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.camera2.interop.Camera2CameraInfo
+import androidx.camera.camera2.interop.Camera2CameraControl
+import androidx.camera.camera2.interop.CaptureRequestOptions
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureRequest
+import android.hardware.camera2.params.RggbChannelVector
 import android.graphics.ImageFormat
 import android.util.Range
 import android.util.Size
@@ -112,6 +115,16 @@ private val Panel = Color(0xFF171A20)
 private val Accent = Color(0xFFC7F36B)
 private val Muted = Color(0xFF9DA3AD)
 
+private fun temperatureGains(kelvin: Int): RggbChannelVector {
+    val t = kelvin.coerceIn(2500, 8000) / 100.0
+    val red = if (t <= 66.0) 255.0 else (329.698727446 * Math.pow(t - 60.0, -0.1332047592)).coerceIn(0.0, 255.0)
+    val green = if (t <= 66.0) (99.4708025861 * kotlin.math.ln(t) - 161.1195681661).coerceIn(0.0, 255.0) else (288.1221695283 * Math.pow(t - 60.0, -0.0755148492)).coerceIn(0.0, 255.0)
+    val blue = when { t >= 66.0 -> 255.0; t <= 19.0 -> 0.0; else -> (138.5177312231 * kotlin.math.ln(t - 10.0) - 305.0447927307).coerceIn(0.0, 255.0) }
+    val rGain = (green / red.coerceAtLeast(1.0)).toFloat().coerceIn(0.5f, 8f)
+    val bGain = (green / blue.coerceAtLeast(1.0)).toFloat().coerceIn(0.5f, 8f)
+    return RggbChannelVector(rGain, 1f, 1f, bGain)
+}
+
 private enum class AppPage { CAMERA, SETTINGS, SENSORS, AI }
 private data class LensOption(val id: String, val facing: Int, val label: String)
 
@@ -163,7 +176,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
     var manualControls by remember { mutableStateOf(false) }
     var manualIso by remember { mutableStateOf(400) }
     var manualExposureNs by remember { mutableStateOf(10_000_000L) }
-    var whiteBalance by remember { mutableStateOf("Auto") }
+    var temperatureKelvin by remember { mutableStateOf(5500) }
     var videoQuality by remember { mutableStateOf("HD") }
     var videoFps by remember { mutableStateOf(30) }
     var photoResolution by remember { mutableStateOf("Maximale") }
@@ -223,6 +236,24 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
     LaunchedEffect(page) {
         if (page == AppPage.SENSORS) capabilityText = describeCameraHardware(context)
     }
+    LaunchedEffect(boundCamera, manualControls, manualIso, manualExposureNs, temperatureKelvin) {
+        val camera = boundCamera ?: return@LaunchedEffect
+        runCatching {
+            val chars = (context.getSystemService(Context.CAMERA_SERVICE) as CameraManager).getCameraCharacteristics(selectedCameraId ?: Camera2CameraInfo.from(camera.cameraInfo).cameraId)
+            val isoRange = chars.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
+            val exposureRange = chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
+            val builder = CaptureRequestOptions.Builder()
+            if (manualControls && isoRange != null && exposureRange != null) {
+                builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+                builder.setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, manualIso.coerceIn(isoRange.lower, isoRange.upper))
+                builder.setCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME, manualExposureNs.coerceIn(exposureRange.lower, exposureRange.upper))
+            } else builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+            builder.setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_OFF)
+            builder.setCaptureRequestOption(CaptureRequest.COLOR_CORRECTION_MODE, CaptureRequest.COLOR_CORRECTION_MODE_FAST)
+            builder.setCaptureRequestOption(CaptureRequest.COLOR_CORRECTION_GAINS, temperatureGains(temperatureKelvin))
+            Camera2CameraControl.from(camera.cameraControl).setCaptureRequestOptions(builder.build())
+        }
+    }
 
     Column(Modifier.fillMaxSize().background(Ink).padding(horizontal = 16.dp)) {
         Header(page = page, flashEnabled = flashEnabled, onFlash = { flashEnabled = !flashEnabled }, onBack = { page = AppPage.CAMERA }, onSettings = { page = AppPage.SETTINGS })
@@ -244,7 +275,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                             manualControls = manualControls,
                             manualIso = manualIso,
                             manualExposureNs = manualExposureNs,
-                            whiteBalance = whiteBalance,
+                            temperatureKelvin = temperatureKelvin,
                             videoQuality = videoQuality,
                             videoFps = videoFps,
                             availableVideoFps = availableVideoFps,
@@ -369,8 +400,9 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text("Contrôle manuel en direct", color = Accent, fontSize = 11.sp); TextButton(onClick = { manualControls = !manualControls }) { Text(if (manualControls) "MANUEL" else "AUTO", color = if (manualControls) Accent else Muted) } }
                         if (sensorRange != null && sensorRange.upper > sensorRange.lower) { Text("ISO ${manualIso.coerceIn(sensorRange.lower, sensorRange.upper)} · ${sensorRange.lower}–${sensorRange.upper}", color = Color.White, fontSize = 11.sp); Slider(value = manualIso.coerceIn(sensorRange.lower, sensorRange.upper).toFloat(), onValueChange = { manualIso = it.roundToInt(); manualControls = true }, valueRange = sensorRange.lower.toFloat()..sensorRange.upper.toFloat()) }
                         if (timeRange != null && timeRange.upper > timeRange.lower) { Text("Temps de pose ${(manualExposureNs.coerceIn(timeRange.lower, timeRange.upper) / 1_000_000.0).let { String.format(Locale.US, "%.2f", it) }} ms", color = Color.White, fontSize = 11.sp); Slider(value = manualExposureNs.coerceIn(timeRange.lower, timeRange.upper).toDouble().toFloat(), onValueChange = { manualExposureNs = it.toLong(); manualControls = true }, valueRange = timeRange.lower.toDouble().toFloat()..timeRange.upper.toDouble().toFloat()) }
-                        Text("Balance des blancs / température", color = Color.White, fontSize = 11.sp)
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) { listOf("Auto", "Chaud", "Jour", "Froid").forEach { wb -> TextButton(onClick = { whiteBalance = wb }) { Text(wb, color = if (whiteBalance == wb) Accent else Muted) } } }
+                        Text("Température de couleur : ${temperatureKelvin} K", color = Color.White, fontSize = 11.sp)
+                        Slider(value = temperatureKelvin.toFloat(), onValueChange = { temperatureKelvin = it.roundToInt() }, valueRange = 2500f..8000f, steps = 54)
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) { listOf("Chaud" to 3000, "Neutre" to 5500, "Jour" to 6500, "Froid" to 8000).forEach { (label, kelvin) -> TextButton(onClick = { temperatureKelvin = kelvin }) { Text(label, color = if (temperatureKelvin == kelvin) Accent else Muted) } } }
                         Text("Format photo", color = Color.White, fontSize = 11.sp)
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) { listOf("JPEG", "JPG", "PNG", "DNG").forEach { fmt -> TextButton(onClick = { outputFormat = fmt }) { Text(fmt, color = if (outputFormat == fmt) Accent else Muted) } } }
                         Text("Résolution : $photoResolution", color = Color.White, fontSize = 11.sp)
@@ -567,7 +599,7 @@ private fun CameraPreview(
     manualControls: Boolean,
     manualIso: Int,
     manualExposureNs: Long,
-    whiteBalance: String,
+    temperatureKelvin: Int,
     videoQuality: String,
     videoFps: Int,
     availableVideoFps: List<Int>,
@@ -582,7 +614,7 @@ private fun CameraPreview(
         scaleType = PreviewView.ScaleType.FILL_CENTER
         implementationMode = PreviewView.ImplementationMode.COMPATIBLE
     } }
-    DisposableEffect(lifecycleOwner, lensFacing, selectedCameraId, flashEnabled, selectedMode, manualControls, manualIso, manualExposureNs, whiteBalance, videoQuality, videoFps, photoResolution) {
+    DisposableEffect(lifecycleOwner, lensFacing, selectedCameraId, flashEnabled, selectedMode, videoQuality, videoFps, photoResolution) {
         val future = ProcessCameraProvider.getInstance(context)
         val listener = Runnable {
             val provider = future.get()
@@ -606,16 +638,6 @@ private fun CameraPreview(
             }
             val highestResolution = ResolutionSelector.Builder().setResolutionStrategy(resolutionStrategy).build()
             val captureBuilder = ImageCapture.Builder().setCaptureMode(captureMode).setResolutionSelector(highestResolution)
-            if (manualControls) {
-                val manualIsoSafe = manualIso.coerceAtLeast(50)
-                val exposureSafe = manualExposureNs.coerceAtLeast(100_000L)
-                runCatching { androidx.camera.camera2.interop.Camera2Interop.Extender(previewBuilder).setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF).setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, manualIsoSafe).setCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME, exposureSafe) }
-                runCatching { androidx.camera.camera2.interop.Camera2Interop.Extender(captureBuilder).setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF).setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, manualIsoSafe).setCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME, exposureSafe) }
-            }
-            val wbMode = when (whiteBalance) { "Chaud" -> CaptureRequest.CONTROL_AWB_MODE_INCANDESCENT; "Jour" -> CaptureRequest.CONTROL_AWB_MODE_DAYLIGHT; "Froid" -> CaptureRequest.CONTROL_AWB_MODE_CLOUDY_DAYLIGHT; else -> CaptureRequest.CONTROL_AWB_MODE_AUTO }
-            runCatching { androidx.camera.camera2.interop.Camera2Interop.Extender(previewBuilder).setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, wbMode) }
-            runCatching { androidx.camera.camera2.interop.Camera2Interop.Extender(captureBuilder).setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, wbMode) }
-            runCatching { androidx.camera.camera2.interop.Camera2Interop.Extender(videoBuilder).setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, wbMode) }
             var capture = captureBuilder.build()
             val preview = previewBuilder.build().also { it.surfaceProvider = previewView.surfaceProvider }
             val selectorBuilder = CameraSelector.Builder().requireLensFacing(lensFacing)
