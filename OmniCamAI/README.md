@@ -40,3 +40,68 @@ Application Android native Kotlin / Jetpack Compose, CameraX et Camera2. Projet 
 Le workflow GitHub Actions `.github/workflows/build-omnicam.yml` exécute les tests JVM puis `gradle :app:assembleDebug --no-daemon` avec JDK 17. L’artefact de test s’appelle `OmniCamAI-debug`.
 
 L’APK Debug n’est pas une version Release signée. Pour publier, configurez une clé de signature protégée dans GitHub Actions Secrets et ajoutez les vérifications de conformité et de confidentialité nécessaires.
+
+
+## Générer et installer une nouvelle version
+
+Le workflow de publication `.github/workflows/release-omnicam.yml` produit un **APK Release signé** quand un tag `vX.Y.Z` est poussé (ex. `v0.2.0`). Il exécute d'abord les tests JVM, puis publie l'APK dans les Releases GitHub et comme artefact Actions. Le numéro de version Android (`versionCode`) augmente à chaque exécution du workflow.
+
+### Configuration obligatoire une seule fois
+
+1. Créer une clé de signature Android/keystore dédiée à OmniCam AI et la sauvegarder dans plusieurs emplacements sécurisés hors du dépôt. **Ne jamais committer le keystore ni son mot de passe.** Si cette clé est perdue, Android ne permettra généralement pas d'installer les futures versions par-dessus l'application signée avec cette clé.
+2. Dans **GitHub → Settings → Secrets and variables → Actions → New repository secret**, ajouter les secrets suivants :
+   - `ANDROID_KEYSTORE_BASE64` : contenu Base64 du fichier keystore (sur macOS/Linux : `base64 -w 0 omnicam-release.jks`; sur macOS, utiliser `base64 omnicam-release.jks | tr -d '\\n'`).
+   - `ANDROID_KEYSTORE_PASSWORD` : mot de passe du keystore.
+   - `ANDROID_KEY_ALIAS` : alias de la clé.
+   - `ANDROID_KEY_PASSWORD` : mot de passe de la clé.
+3. Garder ces secrets privés. Ne pas les mettre dans le code, le README, les issues ou les logs.
+
+### Publier une mise à jour
+
+1. Vérifier les changements et les tests.
+2. Créer et pousser un tag de version, par exemple : `git tag v0.2.0 && git push origin v0.2.0`.
+3. Ouvrir l'onglet **Actions** et attendre que « Build and publish OmniCam AI release » soit vert.
+4. Ouvrir **Releases** et télécharger `OmniCamAI-0.2.0.apk`.
+5. Installer l'APK sur le téléphone. Android peut demander d'autoriser l'installation depuis la source utilisée. Installer par-dessus l'application existante conserve normalement ses données si le package et la clé de signature sont identiques.
+
+**Important :** le dépôt est actuellement privé. Les Releases et artefacts ne sont donc pas des liens de téléchargement publics. Cette livraison prépare des mises à jour signées téléchargeables par les personnes qui ont accès au dépôt ; elle **n'ajoute pas encore un bouton de mise à jour automatique dans l'application**. Pour un vérificateur de mise à jour intégré, il faudra héberger publiquement et durablement un manifeste de version et l'APK (ou utiliser Google Play In-App Updates). Android exigera toujours le consentement de l'utilisateur pour installer un APK hors Play Store.
+
+## Liste de contrôle avant mise en production
+
+### Bloquants avant une première diffusion
+- [ ] Configurer et sauvegarder la clé de signature de production, puis vérifier qu'une mise à jour signée s'installe par-dessus une version précédente sans perte de données.
+- [ ] Définir la distribution : Google Play (recommandé pour les mises à jour), ou téléchargement direct depuis un hébergement fiable.
+- [ ] Vérifier les droits d'accès, la politique de confidentialité et les déclarations Google Play Data safety. Documenter clairement que l'analyse d'image ML Kit se fait sur l'appareil et vérifier le comportement exact des dépendances.
+- [ ] Tester installation propre, mise à jour, retour après échec, manque d'espace, rotation, reprise après fermeture forcée et redémarrage.
+- [ ] Tester sur plusieurs appareils réels et versions Android : caméras avant/arrière, autorisations, flash, autofocus, zoom, photos, galerie, vidéo, températures et mémoire.
+- [ ] Examiner les avertissements et exigences Play Console (target SDK, fiche Store, classification du contenu, coordonnées de support, captures d'écran, icône, déclaration publicitaire si applicable).
+- [ ] Vérifier les licences et obligations des bibliothèques/dépendances et publier les mentions requises.
+- [ ] Ne jamais distribuer une APK Debug comme version de production.
+
+### Qualité photo/vidéo et robustesse
+- [ ] Comparer le rendu sur appareils réels : exposition, balance des blancs, couleurs, HDR, nuit, portraits, scènes mobiles et faible luminosité.
+- [ ] Ajouter alignement des images et déghosting pour HDR/Nuit ; tester les sujets mobiles et les mouvements de main.
+- [ ] Valider chaque combinaison de résolution, FPS, format RAW/DNG et flux simultanés ; proposer des replis et messages explicites quand le matériel refuse une option.
+- [ ] Améliorer la segmentation portrait sur cheveux, lunettes, contours fins, personnes multiples et arrière-plans complexes ; vérifier la cohérence réelle des options de forme/lissage.
+- [ ] Finaliser l'intégration du RAW/DNG dans le flux de capture principal si l'expérience souhaitée est un seul écran caméra.
+- [ ] Ajouter enregistrement vidéo avec audio uniquement après consentement clair, indicateur visible et gestion correcte de la permission microphone, si cette fonction est souhaitée.
+- [ ] Mesurer mémoire, chauffe, batterie, latence, taille des photos et stabilité lors de longues sessions ; tester les capteurs haute résolution.
+- [ ] Vérifier l'accessibilité : contraste, taille de texte, TalkBack, libellés des boutons et cibles tactiles.
+
+### Sécurité, confidentialité et maintenance
+- [ ] Ajouter un écran confidentialité et une adresse de contact ; expliquer les permissions et le stockage des médias.
+- [ ] Vérifier qu'aucune image ni métadonnée n'est envoyée à un serveur sans information et consentement ; décider si les données EXIF/localisation sont conservées.
+- [ ] Mettre en place suivi des crashs respectueux de la vie privée, journaux sans données sensibles et procédure de réponse aux bugs.
+- [ ] Épingler/mettre à jour les dépendances, surveiller les avis de sécurité et automatiser les tests/builds sur chaque changement.
+- [ ] Ajouter tests unitaires et tests instrumentés pour permissions, rotation, cycle de vie caméra, stockage, fusion HDR/Nuit et échec des traitements.
+- [ ] Vérifier sauvegarde/restauration, migrations de préférences et compatibilité ascendante des paramètres.
+- [ ] Préparer notes de version, versionnement cohérent, canal bêta, procédure de retour arrière et support utilisateur.
+
+### Fonctions produit à envisager après stabilisation
+- [ ] Retouche générative IA (non implémentée actuellement) avec indication claire des modifications générées.
+- [ ] Galerie complète : parcourir, supprimer, partager, favoris et détails EXIF.
+- [ ] Préréglages photo, histogramme, zébras, focus peaking et verrouillage exposition/mise au point.
+- [ ] RAW+JPEG, contrôle du ratio, minuterie, rafale et retardateur.
+- [ ] Tests de performance comparatifs et profils de compatibilité par modèle d'appareil.
+
+Une compilation réussie ne remplace pas les essais sur appareils physiques, la validation de sécurité/confidentialité ni l'acceptation de la boutique.
