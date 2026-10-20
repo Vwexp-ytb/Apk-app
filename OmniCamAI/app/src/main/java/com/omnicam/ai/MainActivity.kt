@@ -187,6 +187,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
     var videoQuality by remember { mutableStateOf("HD") }
     var videoFps by remember { mutableStateOf(30) }
     var photoResolution by remember { mutableStateOf("Maximale") }
+    var timerSeconds by remember { mutableStateOf(0) }
     var capabilityText by remember { mutableStateOf("Lecture des capacités caméra…") }
     var aiStatus by remember { mutableStateOf("Les photos sont analysées localement après la capture.") }
     var latestPhoto by remember { mutableStateOf<Bitmap?>(null) }
@@ -260,6 +261,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
         videoQuality = preferences.getString("videoQuality", "HD") ?: "HD"
         videoFps = preferences.getInt("videoFps", 30)
         photoResolution = preferences.getString("photoResolution", "Maximale") ?: "Maximale"
+        timerSeconds = preferences.getInt("timerSeconds", 0)
         showPortraitControls = preferences.getBoolean("showPortraitControls", true)
         portraitPixelSize = preferences.getInt("portraitPixelSize", 14)
         portraitShape = preferences.getString("portraitShape", "Carré") ?: "Carré"
@@ -271,7 +273,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
     LaunchedEffect(
         preferencesLoaded, selectedMode, lensFacing, selectedCameraId, showGrid, flashEnabled,
         outputFormat, aiEnabled, manualControls, manualIso, manualExposureNs, temperatureKelvin,
-        videoQuality, videoFps, photoResolution, showPortraitControls, portraitPixelSize,
+        videoQuality, videoFps, photoResolution, timerSeconds, showPortraitControls, portraitPixelSize,
         portraitShape, portraitEdgeSoftness, portraitMosaicSmoothing
     ) {
         if (preferencesLoaded) preferences.edit()
@@ -289,6 +291,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
             .putString("videoQuality", videoQuality)
             .putInt("videoFps", videoFps)
             .putString("photoResolution", photoResolution)
+            .putInt("timerSeconds", timerSeconds)
             .putBoolean("showPortraitControls", showPortraitControls)
             .putInt("portraitPixelSize", portraitPixelSize)
             .putString("portraitShape", portraitShape)
@@ -315,6 +318,22 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
             builder.setCaptureRequestOption(CaptureRequest.COLOR_CORRECTION_MODE, CaptureRequest.COLOR_CORRECTION_MODE_FAST)
             builder.setCaptureRequestOption(CaptureRequest.COLOR_CORRECTION_GAINS, temperatureGains(temperatureKelvin))
             Camera2CameraControl.from(camera.cameraControl).setCaptureRequestOptions(builder.build())
+        }
+    }
+
+    fun performPhotoCapture() {
+        val capture = imageCapture
+        if (outputFormat == "DNG") {
+            context.startActivity(Intent(context, RawCaptureActivity::class.java))
+        } else if (capture == null) {
+            Toast.makeText(context, "Caméra en cours d’initialisation", Toast.LENGTH_SHORT).show()
+        } else if (boundCamera == null) {
+            Toast.makeText(context, "Caméra indisponible", Toast.LENGTH_SHORT).show()
+        } else {
+            capturePhoto(context, capture, boundCamera!!, selectedMode, cameraExecutor, outputFormat, aiEnabled, portraitPixelSize, portraitShape, portraitEdgeSoftness, portraitMosaicSmoothing) { summary ->
+                aiStatus = summary
+                page = AppPage.AI
+            }
         }
     }
 
@@ -407,14 +426,10 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                     Box(
                         Modifier.size(76.dp).clip(CircleShape).background(Color.White).padding(5.dp)
                             .clip(CircleShape).background(Accent).clickable {
-                                val capture = imageCapture
-                                if (outputFormat == "DNG") { context.startActivity(Intent(context, RawCaptureActivity::class.java)) }
-                                else if (capture == null) Toast.makeText(context, "Caméra en cours d’initialisation", Toast.LENGTH_SHORT).show()
-                                else if (boundCamera == null) Toast.makeText(context, "Caméra indisponible", Toast.LENGTH_SHORT).show()
-                                else capturePhoto(context, capture, boundCamera!!, selectedMode, cameraExecutor, outputFormat, aiEnabled, portraitPixelSize, portraitShape, portraitEdgeSoftness, portraitMosaicSmoothing) { summary ->
-                                    aiStatus = summary
-                                    page = AppPage.AI
-                                }
+                                if (timerSeconds > 0) {
+                                    Toast.makeText(context, "Photo dans ${timerSeconds} s…", Toast.LENGTH_SHORT).show()
+                                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ performPhotoCapture() }, timerSeconds * 1000L)
+                                } else performPhotoCapture()
                             },
                         contentAlignment = Alignment.Center
                     ) { Icon(Icons.Default.CameraAlt, contentDescription = "Prendre une photo", tint = Ink, modifier = Modifier.size(28.dp)) }
@@ -520,6 +535,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                     }
                     SettingTile("Capteurs et résolutions", "Inspecter les capacités Camera2", "Ouvrir") { page = AppPage.SENSORS }
                     SettingTile("Format photo", "Actuel : $outputFormat", "Changer") { outputFormat = when (outputFormat) { "JPEG" -> "PNG"; "PNG" -> "JPG"; "JPG" -> "DNG"; else -> "JPEG" } }
+                    SettingTile("Retardateur photo", if (timerSeconds == 0) "Désactivé" else "$timerSeconds secondes", "Changer") { timerSeconds = when (timerSeconds) { 0 -> 3; 3 -> 10; else -> 0 } }
                     SettingTile("Galerie", "Afficher la dernière photo dans OmniCam", "Ouvrir") { latestPhoto = loadLatestPhotoBitmap(context); page = AppPage.GALLERY }
                     SectionTitle("INTELLIGENCE ARTIFICIELLE", "Traitement local sur le téléphone.")
                     SettingTile("Analyse IA", if (aiEnabled) "Analyse locale activée après capture" else "Analyse désactivée", if (aiEnabled) "Désactiver" else "Activer") { aiEnabled = !aiEnabled }
@@ -556,6 +572,12 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                     Text("Remarque : une taille annoncée par Camera2 n’assure pas que le constructeur autorise cette sortie en combinaison avec les autres flux. La sélection explicite d’un objectif physique et le DNG nécessitent des chemins de capture dédiés.", color = Color.White, fontSize = 12.sp, lineHeight = 18.sp)
                     Spacer(Modifier.height(16.dp))
                     ActionRow("Actualiser les capacités", "Relire Camera2") { capabilityText = describeCameraHardware(context) }
+                    ActionRow("Partager le profil de compatibilité", "Exporter les capacités de ce téléphone") {
+                        val report = "OmniCam AI — profil de compatibilité\\nFabricant : ${Build.MANUFACTURER}\\nModèle : ${Build.MODEL}\\nAndroid : ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})\\n\\n${describeCameraHardware(context)}"
+                        val share = Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_TEXT, report) }
+                        runCatching { context.startActivity(Intent.createChooser(share, "Partager le profil OmniCam")) }
+                            .onFailure { Toast.makeText(context, "Impossible de partager le profil.", Toast.LENGTH_SHORT).show() }
+                    }
                 }
             }
             AppPage.PRIVACY -> {
