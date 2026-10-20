@@ -18,7 +18,6 @@ import java.util.concurrent.Executor
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
-import kotlin.math.roundToInt
 
 /**
  * Small computational burst pipeline. HDR brackets exposure where the device supports EV
@@ -40,11 +39,11 @@ internal object BurstCapture {
         val originalIndex = state.exposureCompensationIndex
         val range = state.exposureCompensationRange
         val step = state.exposureCompensationStep.toFloat().takeIf { it > 0f } ?: 1f
-        val offsets = if (mode == "HDR" && range.lower < range.upper) {
-            listOf((-2f / step).roundToInt(), 0, (2f / step).roundToInt())
-        } else if (mode == "NUIT") listOf(0, 0, 0, 0)
-        else listOf(0)
-        val levels = offsets.map { (originalIndex + it).coerceIn(range.lower, range.upper) }
+        val levels = when {
+            mode == "HDR" && range.lower < range.upper -> CameraMath.exposureBracketIndices(originalIndex, range.lower, range.upper, step)
+            mode == "NUIT" -> listOf(originalIndex, originalIndex, originalIndex, originalIndex)
+            else -> listOf(originalIndex)
+        }
         val files = mutableListOf<File>()
 
         fun finishWithError(message: String) {
