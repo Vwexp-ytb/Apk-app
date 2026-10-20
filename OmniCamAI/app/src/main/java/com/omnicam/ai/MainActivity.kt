@@ -344,9 +344,10 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                         Modifier.size(76.dp).clip(CircleShape).background(Color.White).padding(5.dp)
                             .clip(CircleShape).background(Accent).clickable {
                                 val capture = imageCapture
-                                if (capture == null) Toast.makeText(context, "Caméra en cours d’initialisation", Toast.LENGTH_SHORT).show()
+                                if (outputFormat == "DNG") { context.startActivity(Intent(context, RawCaptureActivity::class.java)) }
+                                else if (capture == null) Toast.makeText(context, "Caméra en cours d’initialisation", Toast.LENGTH_SHORT).show()
                                 else if (boundCamera == null) Toast.makeText(context, "Caméra indisponible", Toast.LENGTH_SHORT).show()
-                                else if (outputFormat == "DNG") { context.startActivity(Intent(context, RawCaptureActivity::class.java)) } else capturePhoto(context, capture, boundCamera!!, selectedMode, cameraExecutor, outputFormat, aiEnabled) { summary ->
+                                else capturePhoto(context, capture, boundCamera!!, selectedMode, cameraExecutor, outputFormat, aiEnabled) { summary ->
                                     aiStatus = summary
                                     page = AppPage.AI
                                 }
