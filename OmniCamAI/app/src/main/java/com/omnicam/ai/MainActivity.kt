@@ -193,8 +193,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
             val manager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
             val id = selectedCameraId ?: manager.cameraIdList.firstOrNull { manager.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) == if (lensFacing == CameraSelector.LENS_FACING_BACK) CameraCharacteristics.LENS_FACING_BACK else CameraCharacteristics.LENS_FACING_FRONT }
             val ranges = id?.let { manager.getCameraCharacteristics(it).get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)?.toList() }.orEmpty()
-            val standard = ranges.flatMap { range -> listOf(24, 30, 60, 120).filter { it >= range.lower && it <= range.upper } }.distinct().sorted()
-            if (standard.isNotEmpty()) standard else ranges.map { it.upper }.distinct().sorted().ifEmpty { listOf(30) }
+            ranges.map { it.upper }.distinct().sorted().ifEmpty { listOf(30) }
         }.getOrDefault(listOf(30))
     }
 
@@ -574,7 +573,12 @@ private fun CameraPreview(
             val recorder = Recorder.Builder().setQualitySelector(QualitySelector.from(targetQuality, FallbackStrategy.lowerQualityOrHigherThan(Quality.SD))).build()
             val fpsRange = (availableVideoFps.ifEmpty { listOf(30) }).minByOrNull { kotlin.math.abs(it - videoFps) } ?: 30
             val videoBuilder = VideoCapture.Builder<Recorder>().setVideoOutput(recorder)
-            runCatching { videoBuilder.setTargetFrameRate(Range(fpsRange, fpsRange)) }
+            val supportedRange = runCatching {
+                val manager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+                val id = selectedCameraId ?: manager.cameraIdList.firstOrNull { manager.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) == if (lensFacing == CameraSelector.LENS_FACING_BACK) CameraCharacteristics.LENS_FACING_BACK else CameraCharacteristics.LENS_FACING_FRONT }
+                id?.let { manager.getCameraCharacteristics(it).get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)?.firstOrNull { range -> range.upper == fpsRange } }
+            }.getOrNull()
+            if (supportedRange != null) runCatching { androidx.camera.camera2.interop.Camera2Interop.Extender(videoBuilder).setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, supportedRange) }
             val video = videoBuilder.build()
             val resolutionStrategy = when (photoResolution) {
                 "HD" -> ResolutionStrategy(Size(1280, 720), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER)
