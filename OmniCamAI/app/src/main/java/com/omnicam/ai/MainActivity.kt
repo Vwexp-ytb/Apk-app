@@ -353,8 +353,8 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                     SettingTile("Analyse de scène", "Classification locale de la photo après capture", "Ouvrir la galerie") { openGallery(context) }
                     SettingTile("Dernier résultat", aiStatus, "Réinitialiser") { aiStatus = "Les photos sont analysées localement après la capture." }
                     SettingTile("Mode nuit", "Capture priorisant la qualité, sans fusion multi-images", "Activer") { selectedMode = "NUIT"; page = AppPage.CAMERA }
-                    SettingTile("Mode portrait", "Sélection de mode UI uniquement dans cette version", "Activer") { selectedMode = "PORTRAIT"; page = AppPage.CAMERA }
-                    Text("HDR multi-images, segmentation portrait, retouche générative et réduction de bruit computationnelle ne sont pas encore disponibles. Ils demandent des pipelines d’image dédiés et des tests sur appareils réels.", color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
+                    SettingTile("Mode portrait", "Détourage du sujet et flou de fond par IA locale", "Activer") { selectedMode = "PORTRAIT"; page = AppPage.CAMERA }
+                    Text("HDR et mode nuit utilisent une fusion multi-images. Le mode portrait utilise la segmentation locale ML Kit et un flou d’arrière-plan. La retouche générative et les commandes RAW restent à développer.", color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
                 }
             }
         }
@@ -543,7 +543,23 @@ private fun capturePhoto(
         override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
             android.os.Handler(android.os.Looper.getMainLooper()).post {
                 Toast.makeText(context, "Photo enregistrée dans Pictures/OmniCam", Toast.LENGTH_SHORT).show()
-                outputFileResults.savedUri?.let(::analyze) ?: onAnalysis("Photo enregistrée, mais son URI est indisponible.")
+                val saved = outputFileResults.savedUri
+                if (saved == null) {
+                    onAnalysis("Photo enregistrée, mais son URI est indisponible.")
+                } else if (mode == "PORTRAIT") {
+                    Toast.makeText(context, "Détourage du sujet par IA…", Toast.LENGTH_SHORT).show()
+                    PortraitProcessor.process(context, saved) { portraitUri ->
+                        if (portraitUri != null) {
+                            Toast.makeText(context, "Portrait avec flou d’arrière-plan enregistré", Toast.LENGTH_LONG).show()
+                            analyze(portraitUri)
+                        } else {
+                            Toast.makeText(context, "Détourage indisponible ; photo originale conservée.", Toast.LENGTH_LONG).show()
+                            analyze(saved)
+                        }
+                    }
+                } else {
+                    analyze(saved)
+                }
             }
         }
         override fun onError(exception: ImageCaptureException) {
