@@ -129,3 +129,13 @@ Une compilation réussie ne remplace pas les essais sur appareils physiques, la 
 8. Le canal de mise à jour automatique intégré à l'application n'est pas implémenté ; pour l'instant, il faut télécharger puis installer l'APK publié (ou distribuer l'application via Google Play).
 
 Les workflows automatisés sont un filet de sécurité, pas une preuve de compatibilité universelle ni une certification juridique.
+
+
+- **Retardateur** : désactivé, 3 secondes ou 10 secondes ; la sélection est conservée.
+- **Rafale** : 3 ou 5 photos JPEG séquentielles en mode Photo, enregistrées dans MediaStore sans charger toutes les images en mémoire.
+- **Galerie étendue** : liste les fichiers OmniCam, permet de les ouvrir, partager, supprimer après confirmation et consulter les principales métadonnées EXIF.
+- **Profil de compatibilité** : l'écran Capteurs peut partager un rapport avec fabricant, modèle, version Android et capacités Camera2 annoncées.
+- **Fusion Nuit** : la fusion utilise une moyenne tronquée des échantillons intermédiaires par canal pour réduire l'influence de valeurs aberrantes. Cela ne remplace pas l'alignement des images ni le déghosting optique.
+- **Tests instrumentés** : un test vérifie le manifeste fusionné, la permission caméra, l'absence de permission réseau demandée et les métadonnées de version. Le workflow tente de l'exécuter sur des émulateurs API 26 et API 35.
+
+Consulter aussi [la politique de confidentialité provisoire](PRIVACY_POLICY.md) et [la checklist de mise en production](PRODUCTION_CHECKLIST.md). Les champs responsable/contact, l'audit juridique et les essais sur téléphones physiques restent obligatoires.
