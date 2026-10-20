@@ -583,15 +583,8 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                 }
             }
             AppPage.GALLERY -> {
-                Column(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Dernière photo", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-                    val photo = latestPhoto
-                    if (photo != null) Image(bitmap = photo.asImageBitmap(), contentDescription = "Dernière photo enregistrée", modifier = Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Panel), contentScale = ContentScale.Fit)
-                    else Box(Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Panel), contentAlignment = Alignment.Center) { Text("Aucune photo trouvée dans la galerie.", color = Muted) }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                        TextButton(onClick = { latestPhoto = loadLatestPhotoBitmap(context) }) { Text("Actualiser", color = Accent) }
-                        TextButton(onClick = { page = AppPage.CAMERA }) { Text("Retour caméra", color = Accent) }
-                    }
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    MediaGalleryScreen(onBack = { page = AppPage.CAMERA })
                 }
             }
             AppPage.AI -> {
