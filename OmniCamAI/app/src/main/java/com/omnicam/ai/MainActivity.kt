@@ -33,6 +33,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -40,7 +42,10 @@ import androidx.compose.material.icons.filled.FlashOff
 import androidx.compose.material.icons.filled.FlipCameraAndroid
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Slider
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -67,6 +72,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import kotlin.math.roundToInt
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.label.ImageLabeling
 import com.google.mlkit.vision.label.defaults.ImageLabelerOptions
@@ -115,6 +121,8 @@ private fun CameraScreen(cameraExecutor: ExecutorService) {
     var imageCapture by remember { mutableStateOf<ImageCapture?>(null) }
     var boundCamera by remember { mutableStateOf<Camera?>(null) }
     var zoomLabel by remember { mutableStateOf("1×") }
+    var showCapabilities by remember { mutableStateOf(false) }
+    var exposureIndex by remember { mutableStateOf(0) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -142,7 +150,7 @@ private fun CameraScreen(cameraExecutor: ExecutorService) {
                     cameraExecutor = cameraExecutor,
                     flashEnabled = flashEnabled,
                     selectedMode = selectedMode,
-                    onCaptureReady = { capture, camera -> imageCapture = capture; boundCamera = camera },
+                    onCaptureReady = { capture, camera -> imageCapture = capture; boundCamera = camera; exposureIndex = camera.cameraInfo.exposureState.exposureCompensationIndex },
                     modifier = Modifier.fillMaxSize()
                 )
                 if (showGrid) CompositionGrid(Modifier.fillMaxSize())
@@ -150,8 +158,8 @@ private fun CameraScreen(cameraExecutor: ExecutorService) {
                     modifier = Modifier.align(Alignment.TopStart).padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    InfoChip("AI SCENE", "Analyse active")
-                    InfoChip("HDR+", "Automatique")
+                    InfoChip("IA PHOTO", "Analyse après capture")
+                    InfoChip("CAPTEURS", "Capacités du téléphone")
                 }
                 Text(
                     text = "●  LIVE",
@@ -219,8 +227,8 @@ private fun CameraScreen(cameraExecutor: ExecutorService) {
                 flashEnabled = !flashEnabled
             }
             ToolButton("Grille", Icons.Default.GridOn, showGrid) { showGrid = !showGrid }
-            ToolButton("Réglages", Icons.Default.Tune, selectedMode == "PRO") {
-                selectedMode = if (selectedMode == "PRO") "PHOTO" else "PRO"
+            ToolButton("Capteurs", Icons.Default.Tune, showCapabilities) {
+                showCapabilities = true
             }
             ToolButton("Retourner", Icons.Default.FlipCameraAndroid, false) {
                 lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
@@ -241,6 +249,26 @@ private fun CameraScreen(cameraExecutor: ExecutorService) {
             ModeLabel("PORTRAIT", selectedMode == "PORTRAIT") { selectedMode = "PORTRAIT" }
             ModeLabel("PHOTO", selectedMode == "PHOTO") { selectedMode = "PHOTO" }
             ModeLabel("PRO", selectedMode == "PRO") { selectedMode = "PRO" }
+        }
+        if (selectedMode == "PRO") {
+            val range = boundCamera?.cameraInfo?.exposureState?.exposureCompensationRange
+            if (range != null && range.lower < range.upper) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+                    Text("Exposition : EV $exposureIndex", color = Accent, fontSize = 11.sp)
+                    Slider(
+                        value = exposureIndex.toFloat().coerceIn(range.lower.toFloat(), range.upper.toFloat()),
+                        onValueChange = { value ->
+                            val index = value.roundToInt()
+                            exposureIndex = index
+                            boundCamera?.cameraControl?.setExposureCompensationIndex(index)
+                        },
+                        valueRange = range.lower.toFloat()..range.upper.toFloat(),
+                        steps = (range.upper - range.lower - 1).coerceAtLeast(0)
+                    )
+                }
+            } else {
+                Text("Correction EV non exposée par cette caméra", color = Muted, fontSize = 10.sp)
+            }
         }
         Spacer(Modifier.height(20.dp))
 
@@ -288,6 +316,26 @@ private fun CameraScreen(cameraExecutor: ExecutorService) {
                 Icon(Icons.Default.FlipCameraAndroid, contentDescription = "Changer de caméra", tint = Color.White)
             }
         }
+    }
+
+    if (showCapabilities) {
+        AlertDialog(
+            onDismissRequest = { showCapabilities = false },
+            title = { Text("Capacités des capteurs") },
+            text = {
+                Text(
+                    describeCameraHardware(context),
+                    modifier = Modifier.height(420.dp).verticalScroll(rememberScrollState()),
+                    fontSize = 12.sp
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showCapabilities = false }) { Text("Fermer") }
+            },
+            containerColor = Panel,
+            titleContentColor = Color.White,
+            textContentColor = Color.White
+        )
     }
 }
 
