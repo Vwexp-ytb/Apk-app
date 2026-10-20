@@ -93,7 +93,14 @@ internal object BurstCapture {
 
     private fun merge(files: List<File>, hdr: Boolean): Bitmap {
         require(files.isNotEmpty()) { "Aucune image capturée" }
-        val bitmaps = files.map { BitmapFactory.decodeFile(it.absolutePath) ?: error("JPEG illisible") }
+        val bitmaps = files.map { file ->
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(file.absolutePath, bounds)
+            var sample = 1
+            while ((bounds.outWidth.toLong() / sample) * (bounds.outHeight.toLong() / sample) > 16_000_000L) sample *= 2
+            val options = BitmapFactory.Options().apply { inSampleSize = sample.coerceAtLeast(1); inPreferredConfig = Bitmap.Config.ARGB_8888 }
+            BitmapFactory.decodeFile(file.absolutePath, options) ?: error("JPEG illisible")
+        }
         try {
             val width = bitmaps.minOf { it.width }
             val height = bitmaps.minOf { it.height }
