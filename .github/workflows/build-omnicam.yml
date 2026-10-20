@@ -25,6 +25,13 @@ jobs:
       - name: Lint Android project
         run: gradle :app:lintDebug --no-daemon
         working-directory: OmniCamAI
+      - name: Upload lint report even when lint fails
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: OmniCamAI-lint-report
+          path: OmniCamAI/app/build/reports/lint-results-debug.html
+          if-no-files-found: warn
       - name: Build debug APK
         run: gradle :app:assembleDebug --no-daemon
         working-directory: OmniCamAI
