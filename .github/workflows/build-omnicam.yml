@@ -19,6 +19,9 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.7"
+      - name: Run unit tests
+        run: gradle :app:testDebugUnitTest --no-daemon
+        working-directory: OmniCamAI
       - name: Build debug APK
         run: gradle :app:assembleDebug --no-daemon
         working-directory: OmniCamAI
