@@ -40,7 +40,13 @@ android {
 
     buildTypes {
         getByName("release") {
-            signingConfig = signingConfigs.getByName("release")
+            // Local CI can compile a release candidate without credentials, but the
+            // publishing workflow refuses to run unless the production keystore exists.
+            signingConfig = if (System.getenv("ANDROID_KEYSTORE_PATH").isNullOrBlank()) {
+                null
+            } else {
+                signingConfigs.getByName("release")
+            }
         }
     }
 
