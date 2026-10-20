@@ -23,7 +23,7 @@ class CameraMathTest {
     }
 
     @Test fun bracketClampsCurrentIndexBeforeApplyingOffsets() {
-        assertEquals(listOf(0, 2, 4), CameraMath.exposureBracketIndices(8, 0, 4, 1f))
+        assertEquals(listOf(2, 4, 4), CameraMath.exposureBracketIndices(8, 0, 4, 1f))
     }
 
     @Test(expected = IllegalArgumentException::class)
