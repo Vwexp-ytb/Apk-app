@@ -174,6 +174,15 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
     var showLensDialog by remember { mutableStateOf(false) }
     var showGrid by remember { mutableStateOf(false) }
     var openAfterPhoto by remember { mutableStateOf(false) }
+    val systemGalleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { }
+    fun openSystemGallery() {
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, "image/*")
+            addCategory(Intent.CATEGORY_DEFAULT)
+        }
+        runCatching { systemGalleryLauncher.launch(intent) }
+            .onFailure { Toast.makeText(context, "Aucune galerie disponible", Toast.LENGTH_SHORT).show() }
+    }
     var flashEnabled by remember { mutableStateOf(false) }
     var imageCapture by remember { mutableStateOf<ImageCapture?>(null) }
     var videoCapture by remember { mutableStateOf<VideoCapture<Recorder>?>(null) }
@@ -446,7 +455,12 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                 Spacer(Modifier.height(12.dp))
                 // Minimal shutter strip.
                 Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    RoundAction(Icons.Default.PhotoLibrary, "Galerie") { latestPhoto = loadLatestPhotoBitmap(context); page = AppPage.GALLERY }
+                    Box(Modifier.size(48.dp).clip(RoundedCornerShape(12.dp)).background(Panel).clickable { openSystemGallery() }, contentAlignment = Alignment.Center) {
+                        val thumbnail = latestPhoto
+                        if (thumbnail != null && !thumbnail.isRecycled) {
+                            Image(bitmap = thumbnail.asImageBitmap(), contentDescription = "Dernière photo : ouvrir la galerie système", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                        } else Icon(Icons.Default.PhotoLibrary, contentDescription = "Ouvrir la galerie système", tint = Color.White)
+                    }
                     RoundAction(Icons.Default.Tune, "Autofocus central") {
                         val camera = boundCamera
                         val view = previewViewRef
@@ -572,7 +586,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                     SettingTile("Format photo", "Actuel : $outputFormat", "Changer") { outputFormat = when (outputFormat) { "JPEG" -> "PNG"; "PNG" -> "JPG"; "JPG" -> "DNG"; else -> "JPEG" } }
                     SettingTile("Retardateur photo", if (timerSeconds == 0) "Désactivé" else "$timerSeconds secondes", "Changer") { timerSeconds = when (timerSeconds) { 0 -> 3; 3 -> 10; else -> 0 } }
                     SettingTile("Rafale photo", if (burstCount == 1) "Une photo" else "$burstCount photos · JPEG en mode Photo", "Changer") { burstCount = when (burstCount) { 1 -> 3; 3 -> 5; else -> 1 } }
-                    SettingTile("Galerie", "Afficher la dernière photo dans OmniCam", "Ouvrir") { latestPhoto = loadLatestPhotoBitmap(context); page = AppPage.GALLERY }
+                    SettingTile("Galerie", "Ouvrir la galerie installée sur le téléphone", "Ouvrir") { openSystemGallery() }
                     SectionTitle("INTELLIGENCE ARTIFICIELLE", "Traitement local sur le téléphone.")
                     SettingTile("Analyse IA", if (aiEnabled) "Analyse locale activée après capture" else "Analyse désactivée", if (aiEnabled) "Désactiver" else "Activer") { aiEnabled = !aiEnabled }
                     SettingTile("Mise au point tactile", "Touchez l’aperçu pour faire le point ; l’AF continu reste actif", "Retour caméra") { page = AppPage.CAMERA }
@@ -648,7 +662,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
             AppPage.AI -> {
                 Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     SectionTitle("OMNICAM IA", "Outils disponibles dans cette version.")
-                    SettingTile("Analyse de scène", "Classification locale de la photo après capture", "Voir dernière photo") { latestPhoto = loadLatestPhotoBitmap(context); page = AppPage.GALLERY }
+                    SettingTile("Analyse de scène", "Classification locale de la photo après capture", "Voir dernière photo") { openSystemGallery() }
                     SettingTile("Dernier résultat", aiStatus, "Réinitialiser") { aiStatus = "Les photos sont analysées localement après la capture." }
                     SettingTile("Mode nuit", "Fusion multi-images pour réduire le bruit", "Activer") { selectedMode = "NUIT"; page = AppPage.CAMERA }
                     SettingTile("Mode portrait", "Détourage du sujet et fond légèrement pixelisé par IA locale", "Activer") { selectedMode = "PORTRAIT"; page = AppPage.CAMERA }
