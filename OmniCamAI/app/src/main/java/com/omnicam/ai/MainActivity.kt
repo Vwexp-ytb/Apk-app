@@ -500,6 +500,9 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                             Toast.makeText(context, "Autofocus et mesure au centre", Toast.LENGTH_SHORT).show()
                         } else Toast.makeText(context, "Aperçu en cours d’initialisation", Toast.LENGTH_SHORT).show()
                     }
+                    RoundAction(Icons.Default.CameraAlt, "Objectif") {
+                        showLensDialog = true
+                    }
                     Box(
                         Modifier.size(76.dp).clip(CircleShape).background(Color.White).padding(5.dp)
                             .clip(CircleShape).background(Accent).clickable {
