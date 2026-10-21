@@ -50,7 +50,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -172,7 +171,6 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
     var selectedCameraId by remember { mutableStateOf<String?>(null) }
     var showLensDialog by remember { mutableStateOf(false) }
     var showGrid by remember { mutableStateOf(false) }
-    var openAfterPhoto by remember { mutableStateOf(false) }
     val systemGalleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { }
     fun openSystemGallery() {
         val intent = Intent(Intent.ACTION_VIEW).apply {
@@ -285,7 +283,6 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
             lensFacing = lensOptions.firstOrNull { it.id == savedId }?.facing ?: lensFacing
         }
         showGrid = preferences.getBoolean("showGrid", false)
-        openAfterPhoto = preferences.getBoolean("openAfterPhoto", false)
         flashEnabled = preferences.getBoolean("flashEnabled", false)
         outputFormat = preferences.getString("outputFormat", "JPEG") ?: "JPEG"
         aiEnabled = preferences.getBoolean("aiEnabled", true)
@@ -308,7 +305,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
         if (!hasPermission) permissionLauncher.launch(Manifest.permission.CAMERA)
     }
     LaunchedEffect(
-        preferencesLoaded, selectedMode, lensFacing, selectedCameraId, showGrid, openAfterPhoto, flashEnabled,
+        preferencesLoaded, selectedMode, lensFacing, selectedCameraId, showGrid, flashEnabled,
         outputFormat, aiEnabled, manualControls, manualIso, manualExposureNs, temperatureKelvin,
         videoQuality, videoFps, photoResolution, timerSeconds, burstCount, showPortraitControls, portraitPixelSize,
         portraitShape, portraitEdgeSoftness, portraitMosaicSmoothing
@@ -318,7 +315,6 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
             .putInt("lensFacing", lensFacing)
             .putString("selectedCameraId", selectedCameraId)
             .putBoolean("showGrid", showGrid)
-            .putBoolean("openAfterPhoto", openAfterPhoto)
             .putBoolean("flashEnabled", flashEnabled)
             .putString("outputFormat", outputFormat)
             .putBoolean("aiEnabled", aiEnabled)
