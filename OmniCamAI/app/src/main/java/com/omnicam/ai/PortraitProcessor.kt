@@ -96,18 +96,13 @@ internal object PortraitProcessor {
                             "Diamant" -> ((1.35f - (nx + ny)) * (1f + smoothing * 2f)).coerceIn(0f, 1f)
                             else -> 1f
                         }
-                        // Shape the mosaic cells subtly; higher smoothing blends cell edges into the original background.
-                        val bgMix = (1f - subjectAlpha) * (1f - smoothing * 0.38f * (1f - shapeAlpha))
-                        val fg = srcRow[x]
-                        val bg = bgRow[x]
-                        outRow[x] = (0xFF shl 24) or
-                            (blend((fg shr 16) and 255, (bg shr 16) and 255, subjectAlpha) shl 16) or
-                            (blend((fg shr 8) and 255, (bg shr 8) and 255, subjectAlpha) shl 8) or
-                            blend(fg and 255, bg and 255, subjectAlpha)
-                        // Preserve the original colour on the feathered cell boundary for a softer, less digital finish.
-                        if (bgMix < 0.999f && subjectAlpha < 0.01f) {
-                            outRow[x] = blendColor(fg, outRow[x], bgMix)
-                        }
+                        val foreground = srcRow[x]
+                        val mosaicBackground = bgRow[x]
+                        // Apply the selected cell shape to the background first: opaque inside each cell,
+                        // original background outside it, with a soft transition at rounded/diamond edges.
+                        val shapedBackground = blendColor(foreground, mosaicBackground, shapeAlpha)
+                        // The subject mask then restores the person over the shaped background.
+                        outRow[x] = blendColor(foreground, shapedBackground, subjectAlpha)
                     }
                     result!!.setPixels(outRow, 0, bitmap.width, 0, y, bitmap.width, 1)
                 }
