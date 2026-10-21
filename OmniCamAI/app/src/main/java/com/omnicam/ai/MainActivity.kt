@@ -62,6 +62,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -552,8 +553,19 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                     }
 
                 }
-                Spacer(Modifier.height(8.dp))
-                Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.Center) {
+                Spacer(Modifier.height(4.dp))
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 2.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = {
+                        lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
+                        selectedCameraId = null
+                        zoomLabel = "1×"
+                    }) { Text(if (lensFacing == CameraSelector.LENS_FACING_BACK) "Caméra avant ↗" else "Caméra arrière ↙", color = Accent, fontSize = 11.sp) }
+                    TextButton(onClick = { timerSeconds = when (timerSeconds) { 0 -> 3; 3 -> 10; else -> 0 } }) {
+                        Text(if (timerSeconds == 0) "Retardateur : off" else "Retardateur : ${timerSeconds}s", color = if (timerSeconds == 0) Muted else Accent, fontSize = 11.sp)
+                    }
+                    TextButton(onClick = { showGrid = !showGrid }) { Text(if (showGrid) "Grille ✓" else "Grille", color = if (showGrid) Accent else Muted, fontSize = 11.sp) }
+                }
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 8.dp), horizontalArrangement = Arrangement.Center) {
                     listOf("HDR", "NUIT", "PORTRAIT", "PHOTO", "PRO").forEach { mode ->
                         ModeLabel(mode, selectedMode == mode) { selectedMode = mode }
                     }
@@ -853,6 +865,20 @@ private fun CameraPreview(
             val recorder = Recorder.Builder().setQualitySelector(QualitySelector.from(targetQuality, FallbackStrategy.lowerQualityOrHigherThan(Quality.SD))).build()
             val fpsRange = (availableVideoFps.ifEmpty { listOf(30) }).minByOrNull { kotlin.math.abs(it - videoFps) } ?: 30
             val videoBuilder = VideoCapture.Builder(recorder)
+            // Enable electronic video stabilization only when the active camera advertises it.
+            val supportsVideoStabilization = runCatching {
+                val manager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+                val id = selectedCameraId ?: manager.cameraIdList.firstOrNull { cameraId ->
+                    manager.getCameraCharacteristics(cameraId).get(CameraCharacteristics.LENS_FACING) ==
+                        if (lensFacing == CameraSelector.LENS_FACING_BACK) CameraCharacteristics.LENS_FACING_BACK else CameraCharacteristics.LENS_FACING_FRONT
+                }
+                id?.let { manager.getCameraCharacteristics(it).get(CameraCharacteristics.CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES) }
+                    ?.contains(CameraCharacteristics.CONTROL_VIDEO_STABILIZATION_MODE_ON) == true
+            }.getOrDefault(false)
+            if (supportsVideoStabilization) runCatching {
+                androidx.camera.camera2.interop.Camera2Interop.Extender(videoBuilder)
+                    .setCaptureRequestOption(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON)
+            }
             val supportedRange = runCatching {
                 val manager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
                 val id = selectedCameraId ?: manager.cameraIdList.firstOrNull { manager.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) == if (lensFacing == CameraSelector.LENS_FACING_BACK) CameraCharacteristics.LENS_FACING_BACK else CameraCharacteristics.LENS_FACING_FRONT }
