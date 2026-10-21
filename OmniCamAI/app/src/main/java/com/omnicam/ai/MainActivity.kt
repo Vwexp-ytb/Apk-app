@@ -475,7 +475,6 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                         Modifier.size(76.dp).clip(CircleShape).background(Color.White).padding(5.dp)
                             .clip(CircleShape).background(Accent).clickable {
                                 if (timerSeconds > 0) {
-                                    Toast.makeText(context, "Photo dans ${timerSeconds} s…", Toast.LENGTH_SHORT).show()
                                     android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ performPhotoCapture() }, timerSeconds * 1000L)
                                 } else performPhotoCapture()
                             },
@@ -508,9 +507,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                                         if (event is VideoRecordEvent.Finalize) {
                                             activeRecording = null
                                             isRecording = false
-                                            if (event.error == VideoRecordEvent.Finalize.ERROR_NONE) {
-                                                Toast.makeText(context, "Vidéo enregistrée dans Movies/OmniCam", Toast.LENGTH_LONG).show()
-                                            } else {
+                                            if (event.error != VideoRecordEvent.Finalize.ERROR_NONE) {
                                                 Toast.makeText(context, "Échec vidéo : ${event.error}", Toast.LENGTH_LONG).show()
                                             }
                                         }
@@ -891,7 +888,6 @@ private fun capturePhoto(
     }
 
     if (mode == "HDR" || mode == "NUIT") {
-        Toast.makeText(context, if (mode == "HDR") "Capture HDR multi-images…" else "Rafale nuit : réduction du bruit…", Toast.LENGTH_SHORT).show()
         BurstCapture.capture(
             context = context,
             imageCapture = imageCapture,
@@ -930,10 +926,8 @@ private fun capturePhoto(
                         if (mode == "PORTRAIT") PortraitProcessor.process(context, pngUri, portraitPixelSize, portraitShape, portraitEdgeSoftness, portraitMosaicSmoothing) { portraitUri -> analyze(portraitUri ?: pngUri) } else analyze(pngUri)
                     } catch (e: Exception) { Toast.makeText(context, "Conversion PNG impossible : ${e.message}", Toast.LENGTH_LONG).show(); analyze(saved) }
                 } else if (mode == "PORTRAIT") {
-                    Toast.makeText(context, "Détourage du sujet par IA…", Toast.LENGTH_SHORT).show()
                     PortraitProcessor.process(context, saved, portraitPixelSize, portraitShape, portraitEdgeSoftness, portraitMosaicSmoothing) { portraitUri ->
                         if (portraitUri != null) {
-                            Toast.makeText(context, "Portrait avec fond pixelisé enregistré", Toast.LENGTH_LONG).show()
                             analyze(portraitUri)
                         } else {
                             Toast.makeText(context, "Détourage indisponible ; photo originale conservée.", Toast.LENGTH_LONG).show()
