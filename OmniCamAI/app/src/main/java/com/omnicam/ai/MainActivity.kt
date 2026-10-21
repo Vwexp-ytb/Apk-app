@@ -50,6 +50,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -211,6 +212,16 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
     var portraitMosaicSmoothing by remember { mutableStateOf(42) }
     val lensOptions = remember(context) {
         val manager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+        // Compare focal lengths exposed by rear cameras on this device. Absolute mm values
+        // alone are misleading because phone sensor sizes differ widely.
+        val shortestRearFocal = manager.cameraIdList.mapNotNull { id ->
+            runCatching {
+                val chars = manager.getCameraCharacteristics(id)
+                if (chars.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK)
+                    chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.minOrNull()
+                else null
+            }.getOrNull()
+        }.minOrNull()
         manager.cameraIdList.mapNotNull { id ->
             runCatching {
                 val chars = manager.getCameraCharacteristics(id)
@@ -219,11 +230,17 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                     CameraCharacteristics.LENS_FACING_FRONT -> CameraSelector.LENS_FACING_FRONT
                     else -> return@mapNotNull null
                 }
-                val focal = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull()
+                val focal = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.minOrNull()
+                val lensKind = when {
+                    facing == CameraSelector.LENS_FACING_FRONT -> "Selfie"
+                    focal != null && shortestRearFocal != null && focal <= shortestRearFocal * 1.08f -> "Grand-angle / ultra-grand-angle possible"
+                    focal != null && shortestRearFocal != null && focal >= shortestRearFocal * 1.8f -> "Téléobjectif possible"
+                    else -> "Objectif arrière"
+                }
                 val jpeg = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)?.getOutputSizes(ImageFormat.JPEG)
                     ?.maxByOrNull { it.width.toLong() * it.height }
                 val mp = jpeg?.let { String.format(Locale.US, "%.1f MP", it.width.toLong() * it.height / 1_000_000.0) } ?: "JPEG n/d"
-                LensOption(id, facing, "ID $id · ${if (facing == CameraSelector.LENS_FACING_BACK) "Arrière" else "Avant"} · ${focal?.let { String.format(Locale.US, "%.1f mm", it) } ?: "focale n/d"} · $mp")
+                LensOption(id, facing, "$lensKind · ID $id · ${focal?.let { String.format(Locale.US, "%.1f mm", it) } ?: "focale n/d"} · $mp")
             }.getOrNull()
         }
     }
@@ -373,7 +390,6 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
             capturePhoto(context, capture, boundCamera!!, selectedMode, cameraExecutor, outputFormat, aiEnabled, portraitPixelSize, portraitShape, portraitEdgeSoftness, portraitMosaicSmoothing) { summary ->
                 aiStatus = summary
                 latestPhoto = loadLatestPhotoBitmap(context)
-                if (openAfterPhoto) page = AppPage.AI
             }
         }
     }
@@ -415,6 +431,14 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                                     )
                                 }
                             },
+                            onPinchZoom = { scale ->
+                                boundCamera?.let { camera ->
+                                    val state = camera.cameraInfo.zoomState.value
+                                    val ratio = (state.zoomRatio * scale).coerceIn(state.minZoomRatio, state.maxZoomRatio)
+                                    camera.cameraControl.setZoomRatio(ratio)
+                                    zoomLabel = if (ratio >= 10f) "${ratio.roundToInt()}×" else "${(ratio * 10f).roundToInt() / 10f}×"
+                                }
+                            },
                             modifier = Modifier.fillMaxSize()
                         )
                         if (showGrid) CompositionGrid(Modifier.fillMaxSize())
@@ -422,19 +446,30 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                             Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp),
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            listOf("0.5×", "1×", "2×").forEach { zoom ->
-                                val selected = zoomLabel == zoom
+                            val zoomState = boundCamera?.cameraInfo?.zoomState?.value
+                            val minZoom = zoomState?.minZoomRatio ?: 1f
+                            val maxZoom = zoomState?.maxZoomRatio ?: 1f
+                            val zoomStops = buildList {
+                                if (minZoom < 0.95f) add(minZoom)
+                                if (1f in minZoom..maxZoom) add(1f)
+                                if (2f in minZoom..maxZoom) add(2f)
+                                if (5f in minZoom..maxZoom) add(5f)
+                                if (maxZoom > 2.05f) add(maxZoom)
+                            }.distinct().sorted()
+                            zoomStops.forEach { ratio ->
+                                val zoom = if (ratio >= 10f) "${ratio.roundToInt()}×" else "${(ratio * 10f).roundToInt() / 10f}×"
+                                val selected = zoomLabel == zoom || (zoomState != null && kotlin.math.abs(zoomState.zoomRatio - ratio) < 0.08f)
                                 Box(
                                     Modifier.size(width = 54.dp, height = 38.dp).clip(CircleShape)
                                         .background(if (selected) Accent else Color(0xCC090B0E))
                                         .clickable {
-                                            val ratio = zoom.removeSuffix("×").toFloat()
                                             val state = boundCamera?.cameraInfo?.zoomState?.value
-                                            if (state != null && ratio >= state.minZoomRatio && ratio <= state.maxZoomRatio) {
-                                                boundCamera?.cameraControl?.setZoomRatio(ratio)?.addListener(
+                                            if (state != null) {
+                                                val safeRatio = ratio.coerceIn(state.minZoomRatio, state.maxZoomRatio)
+                                                boundCamera?.cameraControl?.setZoomRatio(safeRatio)?.addListener(
                                                     { zoomLabel = zoom }, ContextCompat.getMainExecutor(context)
                                                 )
-                                            } else Toast.makeText(context, "Ce niveau de zoom n’est pas disponible sur cet objectif.", Toast.LENGTH_SHORT).show()
+                                            }
                                         },
                                     contentAlignment = Alignment.Center
                                 ) { Text(zoom, color = if (selected) Ink else Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
@@ -567,7 +602,6 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                         Toast.makeText(context, "Choisissez le mode dans la barre sous le déclencheur.", Toast.LENGTH_SHORT).show()
                     }
                     SettingTile("Grille de composition", if (showGrid) "Visible" else "Masquée", "Basculer") { showGrid = !showGrid }
-                    SettingTile("Ouvrir le résultat après capture", if (openAfterPhoto) "Activé : ouvre l’analyse" else "Désactivé : reste sur l’appareil photo", if (openAfterPhoto) "Désactiver" else "Activer") { openAfterPhoto = !openAfterPhoto }
                     SettingTile("Caméra active", selectedCameraId?.let { id -> lensOptions.firstOrNull { it.id == id }?.label } ?: if (lensFacing == CameraSelector.LENS_FACING_BACK) "Arrière · automatique" else "Avant · automatique", "Choisir") {
                         showLensDialog = true
                     }
@@ -791,6 +825,7 @@ private fun CameraPreview(
     onCaptureReady: (ImageCapture, Camera, VideoCapture<Recorder>) -> Unit,
     onPreviewReady: (PreviewView) -> Unit,
     onTapToFocus: (PreviewView, Offset) -> Unit,
+    onPinchZoom: (Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -852,9 +887,15 @@ private fun CameraPreview(
         future.addListener(listener, ContextCompat.getMainExecutor(context))
         onDispose { if (future.isDone) runCatching { future.get().unbindAll() } }
     }
-    AndroidView(factory = { previewView }, modifier = modifier.pointerInput(previewView) {
-        detectTapGestures { point -> onTapToFocus(previewView, point) }
-    })
+    AndroidView(factory = { previewView }, modifier = modifier
+        .pointerInput(previewView) {
+            detectTapGestures { point -> onTapToFocus(previewView, point) }
+        }
+        .pointerInput(previewView) {
+            androidx.compose.foundation.gestures.detectTransformGestures { _, _, zoomChange, _ ->
+                if (zoomChange != 1f) onPinchZoom(zoomChange)
+            }
+        })
 }
 
 private fun capturePhoto(
