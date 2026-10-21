@@ -737,12 +737,19 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
 
 @Composable
 private fun Header(page: AppPage, flashEnabled: Boolean, onFlash: () -> Unit, onBack: () -> Unit, onSettings: () -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.End) {
+    Row(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
         if (page == AppPage.CAMERA) {
-            RoundAction(if (flashEnabled) Icons.Default.FlashOn else Icons.Default.FlashOff, if (flashEnabled) "Flash activé" else "Flash désactivé", onFlash)
-            Spacer(Modifier.width(8.dp))
-            RoundAction(Icons.Default.Settings, "Paramètres", onSettings)
+            Column(Modifier.weight(1f)) {
+                Text("OmniCam AI", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                Text("PHOTO · VIDÉO · IA LOCALE", color = Muted, fontSize = 9.sp, letterSpacing = 1.sp)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                RoundAction(if (flashEnabled) Icons.Default.FlashOn else Icons.Default.FlashOff, if (flashEnabled) "Flash activé" else "Flash désactivé", onFlash)
+                Spacer(Modifier.width(8.dp))
+                RoundAction(Icons.Default.Settings, "Paramètres", onSettings)
+            }
         } else {
+            Spacer(Modifier.weight(1f))
             RoundAction(Icons.Default.ArrowBack, "Retour", onBack)
         }
     }
