@@ -15,6 +15,16 @@ fun describeCameraHardware(context: Context): String {
         val manager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
         val cameraIds = manager.cameraIdList
         if (cameraIds.isEmpty()) return "Android n’a exposé aucun capteur caméra à l’application."
+        // Focal lengths are only comparable within a device. Use the shortest rear focal
+        // length as a hint, never as proof that a physical ultra-wide lens is selectable.
+        val shortestRearFocal = cameraIds.mapNotNull { id ->
+            runCatching {
+                val chars = manager.getCameraCharacteristics(id)
+                if (chars.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK)
+                    chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.minOrNull()
+                else null
+            }.getOrNull()
+        }.minOrNull()
 
         cameraIds.joinToString(separator = "\n\n━━━━━━━━━━━━━━━━━━━━\n\n") { id ->
             val c = manager.getCameraCharacteristics(id)
@@ -34,8 +44,15 @@ fun describeCameraHardware(context: Context): String {
             val maxJpeg = jpeg.maxByOrNull { it.width.toLong() * it.height.toLong() }
             val maxRaw = raw.maxByOrNull { it.width.toLong() * it.height.toLong() }
             val sensor = c.get(CameraCharacteristics.SENSOR_INFO_PIXEL_ARRAY_SIZE)
-            val focal = c.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
-                ?.joinToString { "%.1f mm".format(java.util.Locale.US, it) } ?: "Non communiqué"
+            val focalValues = c.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
+            val focal = focalValues?.joinToString { "%.1f mm".format(java.util.Locale.US, it) } ?: "Non communiqué"
+            val shortestFocal = focalValues?.minOrNull()
+            val lensHint = when {
+                facing == "Avant" -> "Caméra frontale"
+                shortestFocal != null && shortestRearFocal != null && shortestFocal <= shortestRearFocal * 1.08f -> "Grand-angle / ultra-grand-angle possible"
+                shortestFocal != null && shortestRearFocal != null && shortestFocal >= shortestRearFocal * 1.8f -> "Téléobjectif possible"
+                else -> "Objectif arrière"
+            }
             val afModes = c.get(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES)
                 ?.filter { mode ->
                     mode == CameraCharacteristics.CONTROL_AF_MODE_OFF ||
@@ -72,7 +89,7 @@ fun describeCameraHardware(context: Context): String {
             val rawMp = maxRaw?.let { "%.1f MP".format(java.util.Locale.US, it.width.toLong() * it.height / 1_000_000.0) }
                 ?: "RAW non exposé"
             buildString {
-                append("Caméra ID $id · $facing\n")
+                append("Caméra ID $id · $facing · $lensHint\n")
                 append("Niveau Camera2 : $level\n")
                 append("Capteur déclaré : ${sensor?.width ?: "?"} × ${sensor?.height ?: "?"} px")
                 if (sensor != null) append(" (%.1f MP)".format(java.util.Locale.US, sensor.width.toLong() * sensor.height / 1_000_000.0))

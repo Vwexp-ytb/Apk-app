@@ -50,6 +50,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -61,6 +62,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -171,7 +173,6 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
     var selectedCameraId by remember { mutableStateOf<String?>(null) }
     var showLensDialog by remember { mutableStateOf(false) }
     var showGrid by remember { mutableStateOf(false) }
-    var openAfterPhoto by remember { mutableStateOf(false) }
     val systemGalleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { }
     fun openSystemGallery() {
         val intent = Intent(Intent.ACTION_VIEW).apply {
@@ -211,6 +212,16 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
     var portraitMosaicSmoothing by remember { mutableStateOf(42) }
     val lensOptions = remember(context) {
         val manager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+        // Compare focal lengths exposed by rear cameras on this device. Absolute mm values
+        // alone are misleading because phone sensor sizes differ widely.
+        val shortestRearFocal = manager.cameraIdList.mapNotNull { id ->
+            runCatching {
+                val chars = manager.getCameraCharacteristics(id)
+                if (chars.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK)
+                    chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.minOrNull()
+                else null
+            }.getOrNull()
+        }.minOrNull()
         manager.cameraIdList.mapNotNull { id ->
             runCatching {
                 val chars = manager.getCameraCharacteristics(id)
@@ -219,11 +230,17 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                     CameraCharacteristics.LENS_FACING_FRONT -> CameraSelector.LENS_FACING_FRONT
                     else -> return@mapNotNull null
                 }
-                val focal = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull()
+                val focal = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.minOrNull()
+                val lensKind = when {
+                    facing == CameraSelector.LENS_FACING_FRONT -> "Selfie"
+                    focal != null && shortestRearFocal != null && focal <= shortestRearFocal * 1.08f -> "Grand-angle / ultra-grand-angle possible"
+                    focal != null && shortestRearFocal != null && focal >= shortestRearFocal * 1.8f -> "Téléobjectif possible"
+                    else -> "Objectif arrière"
+                }
                 val jpeg = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)?.getOutputSizes(ImageFormat.JPEG)
                     ?.maxByOrNull { it.width.toLong() * it.height }
                 val mp = jpeg?.let { String.format(Locale.US, "%.1f MP", it.width.toLong() * it.height / 1_000_000.0) } ?: "JPEG n/d"
-                LensOption(id, facing, "ID $id · ${if (facing == CameraSelector.LENS_FACING_BACK) "Arrière" else "Avant"} · ${focal?.let { String.format(Locale.US, "%.1f mm", it) } ?: "focale n/d"} · $mp")
+                LensOption(id, facing, "$lensKind · ID $id · ${focal?.let { String.format(Locale.US, "%.1f mm", it) } ?: "focale n/d"} · $mp")
             }.getOrNull()
         }
     }
@@ -268,7 +285,6 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
             lensFacing = lensOptions.firstOrNull { it.id == savedId }?.facing ?: lensFacing
         }
         showGrid = preferences.getBoolean("showGrid", false)
-        openAfterPhoto = preferences.getBoolean("openAfterPhoto", false)
         flashEnabled = preferences.getBoolean("flashEnabled", false)
         outputFormat = preferences.getString("outputFormat", "JPEG") ?: "JPEG"
         aiEnabled = preferences.getBoolean("aiEnabled", true)
@@ -291,7 +307,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
         if (!hasPermission) permissionLauncher.launch(Manifest.permission.CAMERA)
     }
     LaunchedEffect(
-        preferencesLoaded, selectedMode, lensFacing, selectedCameraId, showGrid, openAfterPhoto, flashEnabled,
+        preferencesLoaded, selectedMode, lensFacing, selectedCameraId, showGrid, flashEnabled,
         outputFormat, aiEnabled, manualControls, manualIso, manualExposureNs, temperatureKelvin,
         videoQuality, videoFps, photoResolution, timerSeconds, burstCount, showPortraitControls, portraitPixelSize,
         portraitShape, portraitEdgeSoftness, portraitMosaicSmoothing
@@ -301,7 +317,6 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
             .putInt("lensFacing", lensFacing)
             .putString("selectedCameraId", selectedCameraId)
             .putBoolean("showGrid", showGrid)
-            .putBoolean("openAfterPhoto", openAfterPhoto)
             .putBoolean("flashEnabled", flashEnabled)
             .putString("outputFormat", outputFormat)
             .putBoolean("aiEnabled", aiEnabled)
@@ -373,7 +388,6 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
             capturePhoto(context, capture, boundCamera!!, selectedMode, cameraExecutor, outputFormat, aiEnabled, portraitPixelSize, portraitShape, portraitEdgeSoftness, portraitMosaicSmoothing) { summary ->
                 aiStatus = summary
                 latestPhoto = loadLatestPhotoBitmap(context)
-                if (openAfterPhoto) page = AppPage.AI
             }
         }
     }
@@ -407,12 +421,21 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                                 exposureIndex = camera.cameraInfo.exposureState.exposureCompensationIndex
                             },
                             onPreviewReady = { previewViewRef = it },
+                            onCameraFallback = { selectedCameraId = null; zoomLabel = "1×" },
                             onTapToFocus = { view, point ->
                                 boundCamera?.let { camera ->
                                     val p = view.meteringPointFactory.createPoint(point.x, point.y)
                                     camera.cameraControl.startFocusAndMetering(
                                         FocusMeteringAction.Builder(p).setAutoCancelDuration(3, TimeUnit.SECONDS).build()
                                     )
+                                }
+                            },
+                            onPinchZoom = { scale ->
+                                boundCamera?.let { camera ->
+                                    val state = camera.cameraInfo.zoomState.value ?: return@let
+                                    val ratio = (state.zoomRatio * scale).coerceIn(state.minZoomRatio, state.maxZoomRatio)
+                                    camera.cameraControl.setZoomRatio(ratio)
+                                    zoomLabel = if (ratio >= 10f) "${ratio.roundToInt()}×" else "${(ratio * 10f).roundToInt() / 10f}×"
                                 }
                             },
                             modifier = Modifier.fillMaxSize()
@@ -422,19 +445,30 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                             Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp),
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            listOf("0.5×", "1×", "2×").forEach { zoom ->
-                                val selected = zoomLabel == zoom
+                            val zoomState = boundCamera?.cameraInfo?.zoomState?.value
+                            val minZoom = zoomState?.minZoomRatio ?: 1f
+                            val maxZoom = zoomState?.maxZoomRatio ?: 1f
+                            val zoomStops = buildList {
+                                if (minZoom < 0.95f) add(minZoom)
+                                if (1f in minZoom..maxZoom) add(1f)
+                                if (2f in minZoom..maxZoom) add(2f)
+                                if (5f in minZoom..maxZoom) add(5f)
+                                if (maxZoom > 2.05f) add(maxZoom)
+                            }.distinct().sorted()
+                            zoomStops.forEach { ratio ->
+                                val zoom = if (ratio >= 10f) "${ratio.roundToInt()}×" else "${(ratio * 10f).roundToInt() / 10f}×"
+                                val selected = zoomLabel == zoom || (zoomState != null && kotlin.math.abs(zoomState.zoomRatio - ratio) < 0.08f)
                                 Box(
                                     Modifier.size(width = 54.dp, height = 38.dp).clip(CircleShape)
                                         .background(if (selected) Accent else Color(0xCC090B0E))
                                         .clickable {
-                                            val ratio = zoom.removeSuffix("×").toFloat()
                                             val state = boundCamera?.cameraInfo?.zoomState?.value
-                                            if (state != null && ratio >= state.minZoomRatio && ratio <= state.maxZoomRatio) {
-                                                boundCamera?.cameraControl?.setZoomRatio(ratio)?.addListener(
+                                            if (state != null) {
+                                                val safeRatio = ratio.coerceIn(state.minZoomRatio, state.maxZoomRatio)
+                                                boundCamera?.cameraControl?.setZoomRatio(safeRatio)?.addListener(
                                                     { zoomLabel = zoom }, ContextCompat.getMainExecutor(context)
                                                 )
-                                            } else Toast.makeText(context, "Ce niveau de zoom n’est pas disponible sur cet objectif.", Toast.LENGTH_SHORT).show()
+                                            }
                                         },
                                     contentAlignment = Alignment.Center
                                 ) { Text(zoom, color = if (selected) Ink else Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
@@ -468,6 +502,9 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                             camera.cameraControl.startFocusAndMetering(action)
                             Toast.makeText(context, "Autofocus et mesure au centre", Toast.LENGTH_SHORT).show()
                         } else Toast.makeText(context, "Aperçu en cours d’initialisation", Toast.LENGTH_SHORT).show()
+                    }
+                    RoundAction(Icons.Default.CameraAlt, "Objectif") {
+                        showLensDialog = true
                     }
                     Box(
                         Modifier.size(76.dp).clip(CircleShape).background(Color.White).padding(5.dp)
@@ -516,8 +553,19 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                     }
 
                 }
-                Spacer(Modifier.height(8.dp))
-                Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.Center) {
+                Spacer(Modifier.height(4.dp))
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 2.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = {
+                        lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
+                        selectedCameraId = null
+                        zoomLabel = "1×"
+                    }) { Text(if (lensFacing == CameraSelector.LENS_FACING_BACK) "Caméra avant ↗" else "Caméra arrière ↙", color = Accent, fontSize = 11.sp) }
+                    TextButton(onClick = { timerSeconds = when (timerSeconds) { 0 -> 3; 3 -> 10; else -> 0 } }) {
+                        Text(if (timerSeconds == 0) "Retardateur : off" else "Retardateur : ${timerSeconds}s", color = if (timerSeconds == 0) Muted else Accent, fontSize = 11.sp)
+                    }
+                    TextButton(onClick = { showGrid = !showGrid }) { Text(if (showGrid) "Grille ✓" else "Grille", color = if (showGrid) Accent else Muted, fontSize = 11.sp) }
+                }
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 8.dp), horizontalArrangement = Arrangement.Center) {
                     listOf("HDR", "NUIT", "PORTRAIT", "PHOTO", "PRO").forEach { mode ->
                         ModeLabel(mode, selectedMode == mode) { selectedMode = mode }
                     }
@@ -567,7 +615,6 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                         Toast.makeText(context, "Choisissez le mode dans la barre sous le déclencheur.", Toast.LENGTH_SHORT).show()
                     }
                     SettingTile("Grille de composition", if (showGrid) "Visible" else "Masquée", "Basculer") { showGrid = !showGrid }
-                    SettingTile("Ouvrir le résultat après capture", if (openAfterPhoto) "Activé : ouvre l’analyse" else "Désactivé : reste sur l’appareil photo", if (openAfterPhoto) "Désactiver" else "Activer") { openAfterPhoto = !openAfterPhoto }
                     SettingTile("Caméra active", selectedCameraId?.let { id -> lensOptions.firstOrNull { it.id == id }?.label } ?: if (lensFacing == CameraSelector.LENS_FACING_BACK) "Arrière · automatique" else "Avant · automatique", "Choisir") {
                         showLensDialog = true
                     }
@@ -703,12 +750,19 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
 
 @Composable
 private fun Header(page: AppPage, flashEnabled: Boolean, onFlash: () -> Unit, onBack: () -> Unit, onSettings: () -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.End) {
+    Row(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
         if (page == AppPage.CAMERA) {
-            RoundAction(if (flashEnabled) Icons.Default.FlashOn else Icons.Default.FlashOff, if (flashEnabled) "Flash activé" else "Flash désactivé", onFlash)
-            Spacer(Modifier.width(8.dp))
-            RoundAction(Icons.Default.Settings, "Paramètres", onSettings)
+            Column(Modifier.weight(1f)) {
+                Text("OmniCam AI", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                Text("PHOTO · VIDÉO · IA LOCALE", color = Muted, fontSize = 9.sp, letterSpacing = 1.sp)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                RoundAction(if (flashEnabled) Icons.Default.FlashOn else Icons.Default.FlashOff, if (flashEnabled) "Flash activé" else "Flash désactivé", onFlash)
+                Spacer(Modifier.width(8.dp))
+                RoundAction(Icons.Default.Settings, "Paramètres", onSettings)
+            }
         } else {
+            Spacer(Modifier.weight(1f))
             RoundAction(Icons.Default.ArrowBack, "Retour", onBack)
         }
     }
@@ -790,7 +844,9 @@ private fun CameraPreview(
     photoResolution: String,
     onCaptureReady: (ImageCapture, Camera, VideoCapture<Recorder>) -> Unit,
     onPreviewReady: (PreviewView) -> Unit,
+    onCameraFallback: () -> Unit,
     onTapToFocus: (PreviewView, Offset) -> Unit,
+    onPinchZoom: (Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -809,6 +865,20 @@ private fun CameraPreview(
             val recorder = Recorder.Builder().setQualitySelector(QualitySelector.from(targetQuality, FallbackStrategy.lowerQualityOrHigherThan(Quality.SD))).build()
             val fpsRange = (availableVideoFps.ifEmpty { listOf(30) }).minByOrNull { kotlin.math.abs(it - videoFps) } ?: 30
             val videoBuilder = VideoCapture.Builder(recorder)
+            // Enable electronic video stabilization only when the active camera advertises it.
+            val supportsVideoStabilization = runCatching {
+                val manager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+                val id = selectedCameraId ?: manager.cameraIdList.firstOrNull { cameraId ->
+                    manager.getCameraCharacteristics(cameraId).get(CameraCharacteristics.LENS_FACING) ==
+                        if (lensFacing == CameraSelector.LENS_FACING_BACK) CameraCharacteristics.LENS_FACING_BACK else CameraCharacteristics.LENS_FACING_FRONT
+                }
+                id?.let { manager.getCameraCharacteristics(it).get(CameraCharacteristics.CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES) }
+                    ?.contains(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON) == true
+            }.getOrDefault(false)
+            if (supportsVideoStabilization) runCatching {
+                androidx.camera.camera2.interop.Camera2Interop.Extender(videoBuilder)
+                    .setCaptureRequestOption(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON)
+            }
             val supportedRange = runCatching {
                 val manager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
                 val id = selectedCameraId ?: manager.cameraIdList.firstOrNull { manager.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) == if (lensFacing == CameraSelector.LENS_FACING_BACK) CameraCharacteristics.LENS_FACING_BACK else CameraCharacteristics.LENS_FACING_FRONT }
@@ -845,16 +915,38 @@ private fun CameraPreview(
                 capture.flashMode = if (flashEnabled && lensFacing == CameraSelector.LENS_FACING_BACK && camera.cameraInfo.hasFlashUnit()) ImageCapture.FLASH_MODE_ON else ImageCapture.FLASH_MODE_OFF
                 camera.cameraControl.enableTorch(false)
                 onCaptureReady(capture, camera, video)
-            } catch (_: Exception) {
-                Toast.makeText(context, "Impossible de démarrer cette caméra", Toast.LENGTH_SHORT).show()
+            } catch (cameraError: Exception) {
+                // Some manufacturers expose a Camera2 ID that CameraX cannot bind directly.
+                // Never leave the preview dead: retry the default lens for the requested side.
+                if (selectedCameraId != null) {
+                    runCatching {
+                        provider.unbindAll()
+                        val fallbackSelector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
+                        val fallbackCamera = provider.bindToLifecycle(lifecycleOwner, fallbackSelector, preview, capture, video)
+                        capture.flashMode = if (flashEnabled && lensFacing == CameraSelector.LENS_FACING_BACK && fallbackCamera.cameraInfo.hasFlashUnit()) ImageCapture.FLASH_MODE_ON else ImageCapture.FLASH_MODE_OFF
+                        onCaptureReady(capture, fallbackCamera, video)
+                        onCameraFallback()
+                        Toast.makeText(context, "Cet objectif ne peut pas être sélectionné directement ; caméra automatique utilisée.", Toast.LENGTH_LONG).show()
+                    }.onFailure {
+                        Toast.makeText(context, "Impossible de démarrer cette caméra : ${cameraError.localizedMessage ?: "erreur inconnue"}", Toast.LENGTH_LONG).show()
+                    }
+                } else {
+                    Toast.makeText(context, "Impossible de démarrer cette caméra : ${cameraError.localizedMessage ?: "erreur inconnue"}", Toast.LENGTH_LONG).show()
+                }
             }
         }
         future.addListener(listener, ContextCompat.getMainExecutor(context))
         onDispose { if (future.isDone) runCatching { future.get().unbindAll() } }
     }
-    AndroidView(factory = { previewView }, modifier = modifier.pointerInput(previewView) {
-        detectTapGestures { point -> onTapToFocus(previewView, point) }
-    })
+    AndroidView(factory = { previewView }, modifier = modifier
+        .pointerInput(previewView) {
+            detectTapGestures { point -> onTapToFocus(previewView, point) }
+        }
+        .pointerInput(previewView) {
+            detectTransformGestures { _, _, zoomChange, _ ->
+                if (zoomChange != 1f) onPinchZoom(zoomChange)
+            }
+        })
 }
 
 private fun capturePhoto(
