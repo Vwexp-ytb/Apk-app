@@ -50,6 +50,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -430,7 +431,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                             },
                             onPinchZoom = { scale ->
                                 boundCamera?.let { camera ->
-                                    val state = camera.cameraInfo.zoomState.value
+                                    val state = camera.cameraInfo.zoomState.value ?: return@let
                                     val ratio = (state.zoomRatio * scale).coerceIn(state.minZoomRatio, state.maxZoomRatio)
                                     camera.cameraControl.setZoomRatio(ratio)
                                     zoomLabel = if (ratio >= 10f) "${ratio.roundToInt()}×" else "${(ratio * 10f).roundToInt() / 10f}×"
@@ -916,7 +917,7 @@ private fun CameraPreview(
             detectTapGestures { point -> onTapToFocus(previewView, point) }
         }
         .pointerInput(previewView) {
-            androidx.compose.foundation.gestures.detectTransformGestures { _, _, zoomChange, _ ->
+            detectTransformGestures { _, _, zoomChange, _ ->
                 if (zoomChange != 1f) onPinchZoom(zoomChange)
             }
         })
