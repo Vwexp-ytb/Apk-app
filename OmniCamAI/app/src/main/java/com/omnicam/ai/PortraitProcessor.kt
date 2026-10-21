@@ -100,7 +100,7 @@ internal object PortraitProcessor {
                         val mosaicBackground = bgRow[x]
                         // Apply the selected cell shape to the background first: opaque inside each cell,
                         // original background outside it, with a soft transition at rounded/diamond edges.
-                        val shapedBackground = blendColor(foreground, mosaicBackground, shapeAlpha)
+                        val shapedBackground = blendColor(mosaicBackground, foreground, shapeAlpha)
                         // The subject mask then restores the person over the shaped background.
                         outRow[x] = blendColor(foreground, shapedBackground, subjectAlpha)
                     }
