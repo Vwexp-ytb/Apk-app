@@ -873,7 +873,7 @@ private fun CameraPreview(
                         if (lensFacing == CameraSelector.LENS_FACING_BACK) CameraCharacteristics.LENS_FACING_BACK else CameraCharacteristics.LENS_FACING_FRONT
                 }
                 id?.let { manager.getCameraCharacteristics(it).get(CameraCharacteristics.CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES) }
-                    ?.contains(CameraCharacteristics.CONTROL_VIDEO_STABILIZATION_MODE_ON) == true
+                    ?.contains(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON) == true
             }.getOrDefault(false)
             if (supportsVideoStabilization) runCatching {
                 androidx.camera.camera2.interop.Camera2Interop.Extender(videoBuilder)
