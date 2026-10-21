@@ -419,6 +419,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                                 exposureIndex = camera.cameraInfo.exposureState.exposureCompensationIndex
                             },
                             onPreviewReady = { previewViewRef = it },
+                            onCameraFallback = { selectedCameraId = null; zoomLabel = "1×" },
                             onTapToFocus = { view, point ->
                                 boundCamera?.let { camera ->
                                     val p = view.meteringPointFactory.createPoint(point.x, point.y)
@@ -823,6 +824,7 @@ private fun CameraPreview(
     photoResolution: String,
     onCaptureReady: (ImageCapture, Camera, VideoCapture<Recorder>) -> Unit,
     onPreviewReady: (PreviewView) -> Unit,
+    onCameraFallback: () -> Unit,
     onTapToFocus: (PreviewView, Offset) -> Unit,
     onPinchZoom: (Float) -> Unit,
     modifier: Modifier = Modifier
@@ -879,8 +881,24 @@ private fun CameraPreview(
                 capture.flashMode = if (flashEnabled && lensFacing == CameraSelector.LENS_FACING_BACK && camera.cameraInfo.hasFlashUnit()) ImageCapture.FLASH_MODE_ON else ImageCapture.FLASH_MODE_OFF
                 camera.cameraControl.enableTorch(false)
                 onCaptureReady(capture, camera, video)
-            } catch (_: Exception) {
-                Toast.makeText(context, "Impossible de démarrer cette caméra", Toast.LENGTH_SHORT).show()
+            } catch (cameraError: Exception) {
+                // Some manufacturers expose a Camera2 ID that CameraX cannot bind directly.
+                // Never leave the preview dead: retry the default lens for the requested side.
+                if (selectedCameraId != null) {
+                    runCatching {
+                        provider.unbindAll()
+                        val fallbackSelector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
+                        val fallbackCamera = provider.bindToLifecycle(lifecycleOwner, fallbackSelector, preview, capture, video)
+                        capture.flashMode = if (flashEnabled && lensFacing == CameraSelector.LENS_FACING_BACK && fallbackCamera.cameraInfo.hasFlashUnit()) ImageCapture.FLASH_MODE_ON else ImageCapture.FLASH_MODE_OFF
+                        onCaptureReady(capture, fallbackCamera, video)
+                        onCameraFallback()
+                        Toast.makeText(context, "Cet objectif ne peut pas être sélectionné directement ; caméra automatique utilisée.", Toast.LENGTH_LONG).show()
+                    }.onFailure {
+                        Toast.makeText(context, "Impossible de démarrer cette caméra : ${cameraError.localizedMessage ?: "erreur inconnue"}", Toast.LENGTH_LONG).show()
+                    }
+                } else {
+                    Toast.makeText(context, "Impossible de démarrer cette caméra : ${cameraError.localizedMessage ?: "erreur inconnue"}", Toast.LENGTH_LONG).show()
+                }
             }
         }
         future.addListener(listener, ContextCompat.getMainExecutor(context))
