@@ -70,8 +70,6 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.FlashOff
 import androidx.compose.material.icons.filled.FlashOn
-import androidx.compose.material.icons.filled.FlipCameraAndroid
-import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tune
