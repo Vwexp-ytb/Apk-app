@@ -53,7 +53,7 @@ internal object LocalPhotoEnhancer {
                 require(width.toLong() * height <= 24_000_000L)
                 val scaled = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
                 Canvas(scaled).drawBitmap(original, null, android.graphics.Rect(0, 0, width, height),
-                    Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+                    Paint(Paint.ANTI_ALIAS_FLAG or if (upscaleMethod == "Voisin proche") 0 else Paint.FILTER_BITMAP_FLAG))
                 if (scaled !== original) original.recycle()
                 if (zoomEnhance && (noiseMethod != "Désactivé" || smoothing > 0)) {
                     val src = IntArray(width * height)
