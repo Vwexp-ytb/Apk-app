@@ -909,8 +909,8 @@ private fun capturePhoto(
     onAnalysis: (String) -> Unit
 ) {
     fun analyze(uri: android.net.Uri) {
-        if (localUpscale || zoomEnhance) LocalPhotoEnhancer.process(context, uri, localUpscale, zoomEnhance, upscaleFactor, upscaleMethod, noiseMethod, smoothing, sharpening, cameraExecutor) { result ->
-            if (result == null) Toast.makeText(context, "Amélioration indisponible ; original conservé", Toast.LENGTH_SHORT).show()
+        if (localUpscale || zoomEnhance) LocalPhotoEnhancer.process(context, uri, localUpscale, zoomEnhance, upscaleFactor, upscaleMethod, noiseMethod, smoothing, sharpening, cameraExecutor) { result, failure ->
+            if (failure != null) Toast.makeText(context, "$failure Photo originale conservée.", Toast.LENGTH_LONG).show()
         }
         if (!aiEnabled) { onAnalysis("Photo enregistrée · analyse IA désactivée"); return }
         try {
