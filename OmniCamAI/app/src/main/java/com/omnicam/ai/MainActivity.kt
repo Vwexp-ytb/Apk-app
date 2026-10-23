@@ -29,6 +29,10 @@ import androidx.camera.camera2.interop.Camera2CameraControl
 import androidx.camera.camera2.interop.CaptureRequestOptions
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.params.RggbChannelVector
 import android.graphics.ImageFormat
@@ -93,6 +97,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -440,6 +445,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                             modifier = Modifier.fillMaxSize()
                         )
                         if (showGrid) CompositionGrid(Modifier.fillMaxSize())
+                        ElectronicLevel(Modifier.align(Alignment.TopCenter).padding(top = 24.dp))
                         Row(
                             Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp),
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -540,7 +546,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                 }
                 Spacer(Modifier.height(8.dp))
                 Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.Center) {
-                    listOf("HDR", "NUIT", "PORTRAIT", "PHOTO", "PRO").forEach { mode ->
+                    listOf("SPHÈRE", "PANO", "HDR", "NUIT", "PORTRAIT", "PHOTO", "PRO").forEach { mode ->
                         ModeLabel(mode, selectedMode == mode) { selectedMode = mode }
                     }
                 }
@@ -802,6 +808,42 @@ private fun CompositionGrid(modifier: Modifier = Modifier) {
         for (i in 1..2) {
             drawLine(c, Offset(w * i, 0f), Offset(w * i, size.height), strokeWidth = 1f)
             drawLine(c, Offset(0f, h * i), Offset(size.width, h * i), strokeWidth = 1f)
+        }
+    }
+}
+
+
+@Composable
+private fun ElectronicLevel(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    var rollDegrees by remember { mutableStateOf(0f) }
+    var hasSensor by remember { mutableStateOf(false) }
+    DisposableEffect(context) {
+        val manager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        val sensor = manager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
+        hasSensor = sensor != null
+        val listener = object : SensorEventListener {
+            private val rotation = FloatArray(9)
+            private val orientation = FloatArray(3)
+            override fun onSensorChanged(event: SensorEvent) {
+                if (event.sensor.type == Sensor.TYPE_ROTATION_VECTOR) {
+                    SensorManager.getRotationMatrixFromVector(rotation, event.values)
+                    SensorManager.getOrientation(rotation, orientation)
+                    rollDegrees = Math.toDegrees(orientation[2].toDouble()).toFloat()
+                }
+            }
+            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+        }
+        if (sensor != null) manager.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_UI)
+        onDispose { manager.unregisterListener(listener) }
+    }
+    if (hasSensor) {
+        val angle = ((rollDegrees + 180f) % 360f + 360f) % 360f - 180f
+        Box(modifier.size(width = 116.dp, height = 36.dp).clip(RoundedCornerShape(18.dp)).background(Color(0x99090B0E)), contentAlignment = Alignment.Center) {
+            Canvas(Modifier.fillMaxWidth().height(2.dp).rotate(-angle)) {
+                drawLine(if (kotlin.math.abs(angle) < 1.5f) Accent else Color.White, Offset(0f, size.height / 2f), Offset(size.width, size.height / 2f), strokeWidth = 3.dp.toPx())
+            }
+            Text("${angle.roundToInt()}°", color = if (kotlin.math.abs(angle) < 1.5f) Accent else Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
         }
     }
 }
