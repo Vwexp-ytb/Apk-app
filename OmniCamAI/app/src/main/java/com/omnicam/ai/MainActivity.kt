@@ -282,7 +282,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
         aiEnabled = preferences.getBoolean("aiEnabled", true)
         localUpscale = preferences.getBoolean("localUpscale", false)
         zoomEnhance = preferences.getBoolean("zoomEnhance", false)
-        upscaleFactor = preferences.getInt("upscaleFactor", 2).takeIf { it in listOf(2,3,4,8,16) } ?: 2
+        upscaleFactor = preferences.getInt("upscaleFactor", 2).takeIf { it in listOf(2,3,4,8) } ?: 2
         upscaleMethod = preferences.getString("upscaleMethod", "Bilinéraire")?.takeIf { it in listOf("Bilinéraire", "Voisin proche") } ?: "Bilinéraire"
         noiseMethod = preferences.getString("noiseMethod", "Désactivé")?.takeIf { it in listOf("Désactivé", "Médian", "Gaussien") } ?: "Désactivé"
         smoothing = preferences.getInt("smoothing", 0).coerceIn(0,100)
@@ -606,9 +606,9 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                     SettingTile("Galerie", "Ouvrir la galerie installée sur le téléphone", "Ouvrir") { openSystemGallery() }
                     SectionTitle("INTELLIGENCE ARTIFICIELLE", "Traitement local sur le téléphone.")
                     SettingTile("Analyse IA", if (aiEnabled) "Analyse locale activée après capture" else "Analyse désactivée", if (aiEnabled) "Désactiver" else "Activer") { aiEnabled = !aiEnabled }
-                    SettingTile("Agrandissement local", if (localUpscale) "Activé · ×$upscaleFactor après capture" else "Désactivé", if (localUpscale) "Désactiver" else "Activer") { localUpscale = !localUpscale }
-                    SettingTile("Facteur d’agrandissement", "×$upscaleFactor", "Changer") { upscaleFactor = listOf(2,3,4,8,16).let { it[(it.indexOf(upscaleFactor)+1)%it.size] } }
-                    SettingTile("Algorithme d’agrandissement", upscaleMethod, "Changer") { upscaleMethod = listOf("Bilinéraire", "Voisin proche").let { it[(it.indexOf(upscaleMethod)+1)%it.size] } }
+                    SettingTile("Agrandissement local (interpolation)", if (localUpscale) "Activé · ×$upscaleFactor après capture · sans IA neuronale" else "Désactivé", if (localUpscale) "Désactiver" else "Activer") { localUpscale = !localUpscale }
+                    SettingTile("Facteur d’agrandissement", "×$upscaleFactor", "Changer") { upscaleFactor = listOf(2,3,4,8).let { it[(it.indexOf(upscaleFactor)+1)%it.size] } }
+                    SettingTile("Algorithme d’agrandissement", "$upscaleMethod · interpolation classique", "Changer") { upscaleMethod = listOf("Bilinéraire", "Voisin proche").let { it[(it.indexOf(upscaleMethod)+1)%it.size] } }
                     SettingTile("Amélioration du zoom", if (zoomEnhance) "Activée · traitement après capture" else "Désactivée", if (zoomEnhance) "Désactiver" else "Activer") { zoomEnhance = !zoomEnhance }
                     SettingTile("Réduction du bruit", noiseMethod, "Changer") { noiseMethod = listOf("Désactivé", "Médian", "Gaussien").let { it[(it.indexOf(noiseMethod)+1)%it.size] } }
                     Text("Lissage : $smoothing %", color = Color.White); Slider(value = smoothing.toFloat(), onValueChange = { smoothing = it.roundToInt() }, valueRange = 0f..100f)
