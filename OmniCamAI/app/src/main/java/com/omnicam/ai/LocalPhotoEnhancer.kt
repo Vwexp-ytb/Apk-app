@@ -26,6 +26,11 @@ internal object LocalPhotoEnhancer {
         source: Uri,
         upscale: Boolean,
         zoomEnhance: Boolean,
+        upscaleFactor: Int,
+        upscaleMethod: String,
+        noiseMethod: String,
+        smoothing: Int,
+        sharpening: Int,
         executor: Executor,
         onComplete: (Uri?) -> Unit
     ) {
@@ -42,7 +47,7 @@ internal object LocalPhotoEnhancer {
                 val options = BitmapFactory.Options().apply { inSampleSize = sample; inPreferredConfig = Bitmap.Config.ARGB_8888 }
                 val original = context.contentResolver.openInputStream(source).use { BitmapFactory.decodeStream(it, null, options) }
                     ?: error("Image illisible")
-                val factor = if (upscale) 2 else 1
+                val factor = if (upscale) upscaleFactor.coerceIn(2,16) else 1
                 val width = original.width * factor
                 val height = original.height * factor
                 require(width.toLong() * height <= 24_000_000L)
@@ -50,6 +55,28 @@ internal object LocalPhotoEnhancer {
                 Canvas(scaled).drawBitmap(original, null, android.graphics.Rect(0, 0, width, height),
                     Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
                 if (scaled !== original) original.recycle()
+                if (zoomEnhance && (noiseMethod != "Désactivé" || smoothing > 0)) {
+                    val src = IntArray(width * height)
+                    scaled.getPixels(src, 0, width, 0, 0, width, height)
+                    val dst = src.copyOf()
+                    for (y in 1 until height - 1) for (x in 1 until width - 1) {
+                        val i = y * width + x
+                        val neighborhood = IntArray(9) { n -> src[(y + n / 3 - 1) * width + x + n % 3 - 1] }
+                        fun channel(shift: Int): Int {
+                            val center = (src[i] ushr shift) and 255
+                            val values = neighborhood.map { (it ushr shift) and 255 }
+                            val target = when (noiseMethod) {
+                                "Médian" -> values.sorted()[4]
+                                "Gaussien" -> values.zip(listOf(1,2,1,2,4,2,1,2,1)).sumOf { it.first * it.second } / 16
+                                else -> values.sum() / 9
+                            }
+                            val mix = if (noiseMethod == "Désactivé") smoothing.coerceIn(0,100) / 100f else (0.5f + smoothing.coerceIn(0,100) / 200f)
+                            return (center * (1 - mix) + target * mix).toInt().coerceIn(0,255)
+                        }
+                        dst[i] = (src[i] and -0x1000000) or (channel(16) shl 16) or (channel(8) shl 8) or channel(0)
+                    }
+                    scaled.setPixels(dst, 0, width, 0, 0, width, height)
+                }
                 val finalBitmap = if (zoomEnhance) {
                     // Local 3x3 unsharp mask with a small threshold to avoid boosting flat-area noise.
                     val pixels = IntArray(width * height)
@@ -63,7 +90,7 @@ internal object LocalPhotoEnhancer {
                             val c = (center ushr shift) and 255
                             val avg = neighbors.sumOf { (it ushr shift) and 255 } / 4
                             val delta = c - avg
-                            return if (kotlin.math.abs(delta) < 5) c else (c + delta * 0.45f).toInt().coerceIn(0,255)
+                            return if (kotlin.math.abs(delta) < 5) c else (c + delta * (sharpening.coerceIn(0,100)/100f)).toInt().coerceIn(0,255)
                         }
                         output[i] = (center and -0x1000000) or (channel(16) shl 16) or (channel(8) shl 8) or channel(0)
                     }
