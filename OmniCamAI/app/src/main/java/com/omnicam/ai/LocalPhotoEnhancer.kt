@@ -150,10 +150,12 @@ internal object LocalPhotoEnhancer {
                 check(updated > 0) { "Impossible de finaliser la photo" }
             }
             return outputUri
-        } catch (_: OutOfMemoryError) {
+        } catch (error: OutOfMemoryError) {
+            Log.e("OmniCamEnhance", "Memory limit reached during local processing", error)
             outputUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
             return null
-        } catch (_: Exception) {
+        } catch (error: Exception) {
+            Log.e("OmniCamEnhance", "Could not save enhanced image", error)
             outputUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
             return null
         } finally {
