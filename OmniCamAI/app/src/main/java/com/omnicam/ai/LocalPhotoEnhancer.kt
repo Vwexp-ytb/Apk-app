@@ -38,28 +38,32 @@ internal object LocalPhotoEnhancer {
         smoothing: Int,
         sharpening: Int,
         executor: Executor,
-        onComplete: (Uri?) -> Unit
+        onComplete: (Uri?, String?) -> Unit
     ) {
         if (!upscale && !zoomEnhance) {
-            onComplete(source)
+            onComplete(source, null)
             return
         }
         try {
             executor.execute {
+                var failure: String? = null
                 val output = try {
                     enhanceAndSave(context, source, upscale, zoomEnhance, upscaleFactor,
                         upscaleMethod, noiseMethod, smoothing, sharpening)
                 } catch (error: OutOfMemoryError) {
                     Log.e("OmniCamEnhance", "Not enough memory while enhancing image", error)
+                    failure = "Mémoire insuffisante pour traiter cette photo."
                     null
                 } catch (error: Exception) {
                     Log.e("OmniCamEnhance", "Local image enhancement failed", error)
+                    failure = "Échec du traitement : ${error.localizedMessage ?: error.javaClass.simpleName}"
                     null
                 }
-                Handler(Looper.getMainLooper()).post { onComplete(output) }
+                Handler(Looper.getMainLooper()).post { onComplete(output ?: source, failure) }
             }
-        } catch (_: Exception) {
-            Handler(Looper.getMainLooper()).post { onComplete(null) }
+        } catch (error: Exception) {
+            Log.e("OmniCamEnhance", "Could not schedule image enhancement", error)
+            Handler(Looper.getMainLooper()).post { onComplete(source, "Impossible de démarrer le traitement.") }
         }
     }
 
@@ -77,8 +81,8 @@ internal object LocalPhotoEnhancer {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         context.contentResolver.openInputStream(source)?.use {
             BitmapFactory.decodeStream(it, null, bounds)
-        } ?: return null
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        } ?: throw IllegalStateException("Impossible d’ouvrir la photo source")
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) throw IllegalStateException("Le fichier source n’est pas une image lisible")
 
         val requestedFactor = if (upscale) upscaleFactor.coerceIn(2, 8) else 1
         val decodePixelLimit = MAX_PIXELS / (requestedFactor.toLong() * requestedFactor)
@@ -93,7 +97,7 @@ internal object LocalPhotoEnhancer {
         }
         val original = context.contentResolver.openInputStream(source)?.use {
             BitmapFactory.decodeStream(it, null, options)
-        } ?: return null
+        } ?: throw IllegalStateException("Le décodage de la photo a échoué")
 
         var scaled: Bitmap? = null
         var finalBitmap: Bitmap? = null
@@ -138,8 +142,8 @@ internal object LocalPhotoEnhancer {
                 }
             }
             outputUri = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
-                ?: return null
-            val bitmap = finalBitmap ?: return null
+                ?: throw IllegalStateException("Création du fichier de sortie impossible")
+            val bitmap = finalBitmap ?: throw IllegalStateException("Bitmap de sortie manquant")
             val wrote = context.contentResolver.openOutputStream(outputUri!!)?.use {
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 94, it)
             } ?: false
@@ -153,11 +157,11 @@ internal object LocalPhotoEnhancer {
         } catch (error: OutOfMemoryError) {
             Log.e("OmniCamEnhance", "Memory limit reached during local processing", error)
             outputUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
-            return null
+            throw error
         } catch (error: Exception) {
             Log.e("OmniCamEnhance", "Could not save enhanced image", error)
             outputUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
-            return null
+            throw IllegalStateException("Enregistrement impossible : ${error.localizedMessage ?: error.javaClass.simpleName}", error)
         } finally {
             original.recycle()
             scaled?.recycle()
