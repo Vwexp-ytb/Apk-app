@@ -217,6 +217,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
     var capabilityText by remember { mutableStateOf("Lecture des capacités caméra…") }
     var aiStatus by remember { mutableStateOf("Les photos sont analysées localement après la capture.") }
     var latestPhoto by remember { mutableStateOf<Bitmap?>(null) }
+    var panoramaFrames by remember { mutableStateOf<List<Bitmap>>(emptyList()) }
     var showPortraitControls by remember { mutableStateOf(true) }
     var portraitPixelSize by remember { mutableStateOf(14) }
     var portraitShape by remember { mutableStateOf("Carré") }
@@ -376,6 +377,21 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
 
     fun performPhotoCapture() {
         val capture = imageCapture
+        if (selectedMode == "PANO" || selectedMode == "SPHÈRE") {
+            if (capture == null || boundCamera == null) {
+                Toast.makeText(context, "Caméra en cours d’initialisation", Toast.LENGTH_SHORT).show()
+                return
+            }
+            val target = if (selectedMode == "SPHÈRE") 12 else 5
+            captureGuidedPanoramaFrame(context, capture, cameraExecutor, panoramaFrames, target,
+                onFrame = { frames, complete ->
+                    panoramaFrames = if (complete) emptyList() else frames
+                    aiStatus = if (complete) "Panorama assemblé et enregistré." else "Capture guidée : ${frames.size}/$target vues."
+                    if (complete) latestPhoto = loadLatestPhotoBitmap(context)
+                },
+                onError = { message -> Toast.makeText(context, message, Toast.LENGTH_LONG).show() })
+            return
+        }
         if (burstCount > 1 && selectedMode == "PHOTO" && (outputFormat == "JPEG" || outputFormat == "JPG")) {
             if (capture == null) {
                 Toast.makeText(context, "Caméra en cours d’initialisation", Toast.LENGTH_SHORT).show()
@@ -543,6 +559,16 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                         }
                     }
 
+                }
+                if (selectedMode == "PANO" || selectedMode == "SPHÈRE") {
+                    val target = if (selectedMode == "SPHÈRE") 12 else 5
+                    Text(
+                        if (selectedMode == "SPHÈRE") "Photo sphère guidée · ${panoramaFrames.size}/$target vues. Tournez lentement avec chevauchement."
+                        else "Panorama guidé · ${panoramaFrames.size}/$target vues. Balayez lentement avec environ 25 % de chevauchement.",
+                        color = Accent, fontSize = 11.sp, lineHeight = 16.sp,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                    )
+                    TextButton(onClick = { panoramaFrames = emptyList() }) { Text("Recommencer", color = Muted) }
                 }
                 Spacer(Modifier.height(8.dp))
                 Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.Center) {
@@ -1023,6 +1049,81 @@ private fun capturePhoto(
             android.os.Handler(android.os.Looper.getMainLooper()).post {
                 Toast.makeText(context, "Échec de la capture : ${exception.message}", Toast.LENGTH_LONG).show()
             }
+        }
+    })
+}
+
+
+private fun captureGuidedPanoramaFrame(
+    context: Context,
+    imageCapture: ImageCapture,
+    ioExecutor: ExecutorService,
+    currentFrames: List<Bitmap>,
+    targetFrames: Int,
+    onFrame: (List<Bitmap>, Boolean) -> Unit,
+    onError: (String) -> Unit
+) {
+    val stamp = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())
+    val fileValues = ContentValues().apply {
+        put(MediaStore.MediaColumns.DISPLAY_NAME, "OmniCam_Guided_$stamp.jpg")
+        put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/OmniCam/Guided")
+    }
+    val output = ImageCapture.OutputFileOptions.Builder(
+        context.contentResolver, MediaStore.Images.Media.EXTERNAL_CONTENT_URI, fileValues
+    ).build()
+    imageCapture.takePicture(output, ioExecutor, object : ImageCapture.OnImageSavedCallback {
+        override fun onImageSaved(results: ImageCapture.OutputFileResults) {
+            val uri = results.savedUri
+            if (uri == null) {
+                android.os.Handler(android.os.Looper.getMainLooper()).post { onError("URI de capture indisponible.") }
+                return
+            }
+            val bitmap = runCatching {
+                context.contentResolver.openInputStream(uri).use { BitmapFactory.decodeStream(it) }
+            }.getOrNull()
+            if (bitmap == null) {
+                android.os.Handler(android.os.Looper.getMainLooper()).post { onError("Lecture de l’image impossible.") }
+                return
+            }
+            val frames = currentFrames + bitmap
+            if (frames.size < targetFrames) {
+                android.os.Handler(android.os.Looper.getMainLooper()).post { onFrame(frames, false) }
+                return
+            }
+            try {
+                val commonHeight = frames.minOf { it.height }
+                val normalized = frames.map { frame ->
+                    if (frame.height == commonHeight) frame
+                    else Bitmap.createScaledBitmap(frame, (frame.width * commonHeight.toFloat() / frame.height).roundToInt(), commonHeight, true)
+                }
+                val advance = normalized.map { (it.width * 0.75f).roundToInt().coerceAtLeast(1) }
+                val outputWidth = advance.sum() + normalized.last().width - advance.last()
+                val stitched = Bitmap.createBitmap(outputWidth, commonHeight, Bitmap.Config.ARGB_8888)
+                val canvas = android.graphics.Canvas(stitched)
+                var left = 0f
+                normalized.forEachIndexed { index, frame ->
+                    canvas.drawBitmap(frame, left, 0f, null)
+                    if (index < normalized.lastIndex) left += advance[index]
+                }
+                val finalValues = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, "OmniCam_Panorama_$stamp.jpg")
+                    put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/OmniCam")
+                }
+                val finalUri = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, finalValues)
+                    ?: error("Création du panorama impossible")
+                context.contentResolver.openOutputStream(finalUri).use {
+                    if (it == null || !stitched.compress(Bitmap.CompressFormat.JPEG, 94, it)) error("Écriture du panorama impossible")
+                }
+                stitched.recycle()
+                android.os.Handler(android.os.Looper.getMainLooper()).post { onFrame(emptyList(), true) }
+            } catch (error: Exception) {
+                android.os.Handler(android.os.Looper.getMainLooper()).post { onError("Assemblage impossible : " + error.message) }
+            }
+        }
+        override fun onError(exception: ImageCaptureException) {
+            android.os.Handler(android.os.Looper.getMainLooper()).post { onError("Capture guidée échouée : " + exception.message) }
         }
     })
 }
