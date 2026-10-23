@@ -119,6 +119,12 @@ internal object LocalPhotoEnhancer {
             }
             Canvas(scaled!!).drawBitmap(original, null, Rect(0, 0, targetWidth, targetHeight), paint)
 
+            // A restrained edge-boost pass compensates for the softness of filtered
+            // interpolation. Nearest-neighbour is intentionally left untouched.
+            if (upscale && upscaleMethod != "Voisin proche") {
+                processBands(scaled!!, targetWidth, targetHeight, BAND_ROWS, "Désactivé", 0f, 0.18f)
+            }
+
             if (zoomEnhance && (noiseMethod != "Désactivé" || smoothing > 0 || sharpening > 0)) {
                 // Work in bounded horizontal bands rather than full-image pixel arrays.
                 val smooth = smoothing.coerceIn(0, 100) / 100f
