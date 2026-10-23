@@ -13,6 +13,7 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
 import java.util.Arrays
+import android.util.Log
 import java.util.concurrent.Executor
 import kotlin.math.max
 import kotlin.math.sqrt
@@ -24,6 +25,7 @@ import kotlin.math.sqrt
 internal object LocalPhotoEnhancer {
     private const val MAX_PIXELS = 8_000_000L
     private const val MAX_DIMENSION = 4096
+    private const val BAND_ROWS = 96
 
     fun process(
         context: Context,
@@ -44,10 +46,16 @@ internal object LocalPhotoEnhancer {
         }
         try {
             executor.execute {
-                val output = runCatching {
+                val output = try {
                     enhanceAndSave(context, source, upscale, zoomEnhance, upscaleFactor,
                         upscaleMethod, noiseMethod, smoothing, sharpening)
-                }.getOrNull()
+                } catch (error: OutOfMemoryError) {
+                    Log.e("OmniCamEnhance", "Not enough memory while enhancing image", error)
+                    null
+                } catch (error: Exception) {
+                    Log.e("OmniCamEnhance", "Local image enhancement failed", error)
+                    null
+                }
                 Handler(Looper.getMainLooper()).post { onComplete(output) }
             }
         } catch (_: Exception) {
@@ -108,51 +116,14 @@ internal object LocalPhotoEnhancer {
             Canvas(scaled!!).drawBitmap(original, null, Rect(0, 0, targetWidth, targetHeight), paint)
 
             if (zoomEnhance && (noiseMethod != "Désactivé" || smoothing > 0 || sharpening > 0)) {
-                val count = targetWidth * targetHeight
-                val src = IntArray(count)
-                scaled!!.getPixels(src, 0, targetWidth, 0, 0, targetWidth, targetHeight)
-                val dst = src.copyOf()
-                val window = IntArray(9)
+                // Work in bounded horizontal bands rather than full-image pixel arrays.
                 val smooth = smoothing.coerceIn(0, 100) / 100f
-                for (y in 1 until targetHeight - 1) {
-                    var i = y * targetWidth + 1
-                    for (x in 1 until targetWidth - 1) {
-                        val pixel = src[i]
-                        val r = filteredChannel(src, i, targetWidth, 16, noiseMethod, smooth, window)
-                        val g = filteredChannel(src, i, targetWidth, 8, noiseMethod, smooth, window)
-                        val b = filteredChannel(src, i, targetWidth, 0, noiseMethod, smooth, window)
-                        dst[i] = (pixel and -0x1000000) or (r shl 16) or (g shl 8) or b
-                        i++
-                    }
+                if (noiseMethod != "Désactivé" || smoothing > 0) {
+                    processBands(scaled!!, targetWidth, targetHeight, BAND_ROWS, noiseMethod, smooth, 0f)
                 }
-                scaled!!.setPixels(dst, 0, targetWidth, 0, 0, targetWidth, targetHeight)
-
                 if (sharpening > 0) {
-                    val input = dst
-                    val sharpened = input.copyOf()
-                    val amount = sharpening.coerceIn(0, 100) / 100f
-                    for (y in 1 until targetHeight - 1) {
-                        var i = y * targetWidth + 1
-                        for (x in 1 until targetWidth - 1) {
-                            val center = input[i]
-                            val left = input[i - 1]
-                            val right = input[i + 1]
-                            val top = input[i - targetWidth]
-                            val bottom = input[i + targetWidth]
-                            fun channel(shift: Int): Int {
-                                val c = (center ushr shift) and 255
-                                val avg = (((left ushr shift) and 255) + ((right ushr shift) and 255) +
-                                    ((top ushr shift) and 255) + ((bottom ushr shift) and 255)) / 4
-                                val delta = c - avg
-                                return if (kotlin.math.abs(delta) < 4) c
-                                    else (c + delta * amount).toInt().coerceIn(0, 255)
-                            }
-                            sharpened[i] = (center and -0x1000000) or
-                                (channel(16) shl 16) or (channel(8) shl 8) or channel(0)
-                            i++
-                        }
-                    }
-                    scaled!!.setPixels(sharpened, 0, targetWidth, 0, 0, targetWidth, targetHeight)
+                    processBands(scaled!!, targetWidth, targetHeight, BAND_ROWS, "Désactivé", 0f,
+                        sharpening.coerceIn(0, 100) / 100f)
                 }
             }
             finalBitmap = scaled
@@ -189,6 +160,58 @@ internal object LocalPhotoEnhancer {
             original.recycle()
             scaled?.recycle()
             finalBitmap?.recycle()
+        }
+    }
+
+    /**
+     * Bounded band processing with a one-row halo for neighborhood filters.
+     * This reduces scratch arrays from image-sized to width * (bandRows + 2).
+     */
+    private fun processBands(
+        bitmap: Bitmap,
+        width: Int,
+        height: Int,
+        bandRows: Int,
+        noiseMethod: String,
+        smoothing: Float,
+        sharpening: Float
+    ) {
+        if (width < 3 || height < 3) return
+        var coreTop = 1
+        while (coreTop < height - 1) {
+            val coreBottom = minOf(height - 1, coreTop + bandRows)
+            val readTop = coreTop - 1
+            val bandHeight = coreBottom - readTop + 1
+            val input = IntArray(width * bandHeight)
+            bitmap.getPixels(input, 0, width, 0, readTop, width, bandHeight)
+            val output = IntArray(width * (coreBottom - coreTop))
+            val window = IntArray(9)
+            for (y in coreTop until coreBottom) {
+                val localY = y - readTop
+                for (x in 1 until width - 1) {
+                    val index = localY * width + x
+                    val pixel = input[index]
+                    fun channel(shift: Int): Int {
+                        if (sharpening > 0f) {
+                            val center = (pixel ushr shift) and 255
+                            val left = (input[index - 1] ushr shift) and 255
+                            val right = (input[index + 1] ushr shift) and 255
+                            val top = (input[index - width] ushr shift) and 255
+                            val bottom = (input[index + width] ushr shift) and 255
+                            val average = (left + right + top + bottom) / 4
+                            val delta = center - average
+                            return if (kotlin.math.abs(delta) < 4) center
+                                else (center + delta * sharpening).toInt().coerceIn(0, 255)
+                        }
+                        return filteredChannel(input, index, width, shift, noiseMethod, smoothing, window)
+                    }
+                    val outputIndex = (y - coreTop) * width + x
+                    output[outputIndex] = (pixel and -0x1000000) or
+                        (channel(16) shl 16) or (channel(8) shl 8) or channel(0)
+                }
+            }
+            bitmap.setPixels(output, 0, width, 0, coreTop, width, coreBottom - coreTop)
+            coreTop = coreBottom
         }
     }
 
