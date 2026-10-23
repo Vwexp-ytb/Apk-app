@@ -188,6 +188,8 @@ internal object LocalPhotoEnhancer {
             val window = IntArray(9)
             for (y in coreTop until coreBottom) {
                 val localY = y - readTop
+                // Keep the first and last columns unchanged in the output band.
+                System.arraycopy(input, localY * width, output, (y - coreTop) * width, width)
                 for (x in 1 until width - 1) {
                     val index = localY * width + x
                     val pixel = input[index]
