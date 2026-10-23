@@ -192,6 +192,8 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
     var exposureIndex by remember { mutableStateOf(0) }
     var outputFormat by remember { mutableStateOf("JPEG") }
     var aiEnabled by remember { mutableStateOf(true) }
+    var localUpscale by remember { mutableStateOf(false) }
+    var zoomEnhance by remember { mutableStateOf(false) }
     var manualControls by remember { mutableStateOf(false) }
     var manualIso by remember { mutableStateOf(400) }
     var manualExposureNs by remember { mutableStateOf(10_000_000L) }
@@ -272,6 +274,8 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
         flashEnabled = preferences.getBoolean("flashEnabled", false)
         outputFormat = preferences.getString("outputFormat", "JPEG") ?: "JPEG"
         aiEnabled = preferences.getBoolean("aiEnabled", true)
+        localUpscale = preferences.getBoolean("localUpscale", false)
+        zoomEnhance = preferences.getBoolean("zoomEnhance", false)
         manualControls = preferences.getBoolean("manualControls", false)
         manualIso = preferences.getInt("manualIso", 400)
         manualExposureNs = preferences.getLong("manualExposureNs", 10_000_000L)
@@ -292,7 +296,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
     }
     LaunchedEffect(
         preferencesLoaded, selectedMode, lensFacing, selectedCameraId, showGrid, openAfterPhoto, flashEnabled,
-        outputFormat, aiEnabled, manualControls, manualIso, manualExposureNs, temperatureKelvin,
+        outputFormat, aiEnabled, localUpscale, zoomEnhance, manualControls, manualIso, manualExposureNs, temperatureKelvin,
         videoQuality, videoFps, photoResolution, timerSeconds, burstCount, showPortraitControls, portraitPixelSize,
         portraitShape, portraitEdgeSoftness, portraitMosaicSmoothing
     ) {
@@ -305,6 +309,8 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
             .putBoolean("flashEnabled", flashEnabled)
             .putString("outputFormat", outputFormat)
             .putBoolean("aiEnabled", aiEnabled)
+            .putBoolean("localUpscale", localUpscale)
+            .putBoolean("zoomEnhance", zoomEnhance)
             .putBoolean("manualControls", manualControls)
             .putInt("manualIso", manualIso)
             .putLong("manualExposureNs", manualExposureNs)
@@ -370,7 +376,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
         } else if (boundCamera == null) {
             Toast.makeText(context, "Caméra indisponible", Toast.LENGTH_SHORT).show()
         } else {
-            capturePhoto(context, capture, boundCamera!!, selectedMode, cameraExecutor, outputFormat, aiEnabled, portraitPixelSize, portraitShape, portraitEdgeSoftness, portraitMosaicSmoothing) { summary ->
+            capturePhoto(context, capture, boundCamera!!, selectedMode, cameraExecutor, outputFormat, aiEnabled, localUpscale, zoomEnhance, portraitPixelSize, portraitShape, portraitEdgeSoftness, portraitMosaicSmoothing) { summary ->
                 aiStatus = summary
                 latestPhoto = loadLatestPhotoBitmap(context)
                 if (openAfterPhoto) page = AppPage.AI
@@ -584,6 +590,9 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                     SettingTile("Galerie", "Ouvrir la galerie installée sur le téléphone", "Ouvrir") { openSystemGallery() }
                     SectionTitle("INTELLIGENCE ARTIFICIELLE", "Traitement local sur le téléphone.")
                     SettingTile("Analyse IA", if (aiEnabled) "Analyse locale activée après capture" else "Analyse désactivée", if (aiEnabled) "Désactiver" else "Activer") { aiEnabled = !aiEnabled }
+                    SettingTile("Agrandissement local ×2", if (localUpscale) "Activé · copie agrandie après capture" else "Désactivé", if (localUpscale) "Désactiver" else "Activer") { localUpscale = !localUpscale }
+                    SettingTile("Amélioration du zoom", if (zoomEnhance) "Activée · netteté et réduction du bruit après capture" else "Désactivée", if (zoomEnhance) "Désactiver" else "Activer") { zoomEnhance = !zoomEnhance }
+                    Text("Traitement hors ligne, sans modèle neuronal pour le moment. La photo originale est conservée ; les détails absents ne peuvent pas être recréés fidèlement.", color = Muted, fontSize = 12.sp)
                     SettingTile("Mise au point tactile", "Touchez l’aperçu pour faire le point ; l’AF continu reste actif", "Retour caméra") { page = AppPage.CAMERA }
                     SectionTitle("PORTRAIT IA", "Réglages du détourage et de la mosaïque d’arrière-plan.")
                     SettingTile("Afficher les réglages portrait", if (showPortraitControls) "Panneau de réglage visible" else "Panneau de réglage masqué", if (showPortraitControls) "Masquer" else "Afficher") { showPortraitControls = !showPortraitControls }
@@ -865,6 +874,8 @@ private fun capturePhoto(
     cameraExecutor: ExecutorService,
     outputFormat: String,
     aiEnabled: Boolean,
+    localUpscale: Boolean,
+    zoomEnhance: Boolean,
     portraitPixelSize: Int,
     portraitShape: String,
     portraitEdgeSoftness: Int,
@@ -872,6 +883,9 @@ private fun capturePhoto(
     onAnalysis: (String) -> Unit
 ) {
     fun analyze(uri: android.net.Uri) {
+        if (localUpscale || zoomEnhance) LocalPhotoEnhancer.process(context, uri, localUpscale, zoomEnhance, cameraExecutor) { result ->
+            if (result == null) Toast.makeText(context, "Amélioration indisponible ; original conservé", Toast.LENGTH_SHORT).show()
+        }
         if (!aiEnabled) { onAnalysis("Photo enregistrée · analyse IA désactivée"); return }
         try {
             ImageLabeling.getClient(ImageLabelerOptions.DEFAULT_OPTIONS).process(InputImage.fromFilePath(context, uri))
