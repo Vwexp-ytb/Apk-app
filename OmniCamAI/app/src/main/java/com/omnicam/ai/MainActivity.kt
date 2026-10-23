@@ -29,6 +29,10 @@ import androidx.camera.camera2.interop.Camera2CameraControl
 import androidx.camera.camera2.interop.CaptureRequestOptions
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.params.RggbChannelVector
 import android.graphics.ImageFormat
@@ -86,12 +90,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -192,6 +198,13 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
     var exposureIndex by remember { mutableStateOf(0) }
     var outputFormat by remember { mutableStateOf("JPEG") }
     var aiEnabled by remember { mutableStateOf(true) }
+    var localUpscale by remember { mutableStateOf(false) }
+    var zoomEnhance by remember { mutableStateOf(false) }
+    var upscaleFactor by remember { mutableIntStateOf(2) }
+    var upscaleMethod by remember { mutableStateOf("Bilinéraire") }
+    var noiseMethod by remember { mutableStateOf("Désactivé") }
+    var smoothing by remember { mutableIntStateOf(0) }
+    var sharpening by remember { mutableIntStateOf(45) }
     var manualControls by remember { mutableStateOf(false) }
     var manualIso by remember { mutableStateOf(400) }
     var manualExposureNs by remember { mutableStateOf(10_000_000L) }
@@ -204,6 +217,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
     var capabilityText by remember { mutableStateOf("Lecture des capacités caméra…") }
     var aiStatus by remember { mutableStateOf("Les photos sont analysées localement après la capture.") }
     var latestPhoto by remember { mutableStateOf<Bitmap?>(null) }
+    var panoramaFrames by remember { mutableStateOf<List<Bitmap>>(emptyList()) }
     var showPortraitControls by remember { mutableStateOf(true) }
     var portraitPixelSize by remember { mutableStateOf(14) }
     var portraitShape by remember { mutableStateOf("Carré") }
@@ -272,6 +286,13 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
         flashEnabled = preferences.getBoolean("flashEnabled", false)
         outputFormat = preferences.getString("outputFormat", "JPEG") ?: "JPEG"
         aiEnabled = preferences.getBoolean("aiEnabled", true)
+        localUpscale = preferences.getBoolean("localUpscale", false)
+        zoomEnhance = preferences.getBoolean("zoomEnhance", false)
+        upscaleFactor = preferences.getInt("upscaleFactor", 2).takeIf { it in listOf(2,3,4,8) } ?: 2
+        upscaleMethod = preferences.getString("upscaleMethod", "Bilinéraire")?.takeIf { it in listOf("Bilinéraire", "Voisin proche") } ?: "Bilinéraire"
+        noiseMethod = preferences.getString("noiseMethod", "Désactivé")?.takeIf { it in listOf("Désactivé", "Médian", "Gaussien") } ?: "Désactivé"
+        smoothing = preferences.getInt("smoothing", 0).coerceIn(0,100)
+        sharpening = preferences.getInt("sharpening", 45).coerceIn(0,100)
         manualControls = preferences.getBoolean("manualControls", false)
         manualIso = preferences.getInt("manualIso", 400)
         manualExposureNs = preferences.getLong("manualExposureNs", 10_000_000L)
@@ -292,7 +313,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
     }
     LaunchedEffect(
         preferencesLoaded, selectedMode, lensFacing, selectedCameraId, showGrid, openAfterPhoto, flashEnabled,
-        outputFormat, aiEnabled, manualControls, manualIso, manualExposureNs, temperatureKelvin,
+        outputFormat, aiEnabled, localUpscale, zoomEnhance, upscaleFactor, upscaleMethod, noiseMethod, smoothing, sharpening, manualControls, manualIso, manualExposureNs, temperatureKelvin,
         videoQuality, videoFps, photoResolution, timerSeconds, burstCount, showPortraitControls, portraitPixelSize,
         portraitShape, portraitEdgeSoftness, portraitMosaicSmoothing
     ) {
@@ -305,6 +326,13 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
             .putBoolean("flashEnabled", flashEnabled)
             .putString("outputFormat", outputFormat)
             .putBoolean("aiEnabled", aiEnabled)
+            .putBoolean("localUpscale", localUpscale)
+            .putBoolean("zoomEnhance", zoomEnhance)
+            .putInt("upscaleFactor", upscaleFactor)
+            .putString("upscaleMethod", upscaleMethod)
+            .putString("noiseMethod", noiseMethod)
+            .putInt("smoothing", smoothing)
+            .putInt("sharpening", sharpening)
             .putBoolean("manualControls", manualControls)
             .putInt("manualIso", manualIso)
             .putLong("manualExposureNs", manualExposureNs)
@@ -349,6 +377,21 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
 
     fun performPhotoCapture() {
         val capture = imageCapture
+        if (selectedMode == "PANO" || selectedMode == "SPHÈRE") {
+            if (capture == null || boundCamera == null) {
+                Toast.makeText(context, "Caméra en cours d’initialisation", Toast.LENGTH_SHORT).show()
+                return
+            }
+            val target = if (selectedMode == "SPHÈRE") 12 else 5
+            captureGuidedPanoramaFrame(context, capture, cameraExecutor, panoramaFrames, target,
+                onFrame = { frames, complete ->
+                    panoramaFrames = if (complete) emptyList() else frames
+                    aiStatus = if (complete) "Panorama assemblé et enregistré." else "Capture guidée : ${frames.size}/$target vues."
+                    if (complete) latestPhoto = loadLatestPhotoBitmap(context)
+                },
+                onError = { message -> Toast.makeText(context, message, Toast.LENGTH_LONG).show() })
+            return
+        }
         if (burstCount > 1 && selectedMode == "PHOTO" && (outputFormat == "JPEG" || outputFormat == "JPG")) {
             if (capture == null) {
                 Toast.makeText(context, "Caméra en cours d’initialisation", Toast.LENGTH_SHORT).show()
@@ -370,7 +413,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
         } else if (boundCamera == null) {
             Toast.makeText(context, "Caméra indisponible", Toast.LENGTH_SHORT).show()
         } else {
-            capturePhoto(context, capture, boundCamera!!, selectedMode, cameraExecutor, outputFormat, aiEnabled, portraitPixelSize, portraitShape, portraitEdgeSoftness, portraitMosaicSmoothing) { summary ->
+            capturePhoto(context, capture, boundCamera!!, selectedMode, cameraExecutor, outputFormat, aiEnabled, localUpscale, zoomEnhance, upscaleFactor, upscaleMethod, noiseMethod, smoothing, sharpening, portraitPixelSize, portraitShape, portraitEdgeSoftness, portraitMosaicSmoothing) { summary ->
                 aiStatus = summary
                 latestPhoto = loadLatestPhotoBitmap(context)
                 if (openAfterPhoto) page = AppPage.AI
@@ -418,6 +461,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                             modifier = Modifier.fillMaxSize()
                         )
                         if (showGrid) CompositionGrid(Modifier.fillMaxSize())
+                        ElectronicLevel(Modifier.align(Alignment.TopCenter).padding(top = 24.dp))
                         Row(
                             Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp),
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -516,9 +560,19 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                     }
 
                 }
+                if (selectedMode == "PANO" || selectedMode == "SPHÈRE") {
+                    val target = if (selectedMode == "SPHÈRE") 12 else 5
+                    Text(
+                        if (selectedMode == "SPHÈRE") "Photo sphère guidée · ${panoramaFrames.size}/$target vues. Tournez lentement avec chevauchement."
+                        else "Panorama guidé · ${panoramaFrames.size}/$target vues. Balayez lentement avec environ 25 % de chevauchement.",
+                        color = Accent, fontSize = 11.sp, lineHeight = 16.sp,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                    )
+                    TextButton(onClick = { panoramaFrames = emptyList() }) { Text("Recommencer", color = Muted) }
+                }
                 Spacer(Modifier.height(8.dp))
                 Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.Center) {
-                    listOf("HDR", "NUIT", "PORTRAIT", "PHOTO", "PRO").forEach { mode ->
+                    listOf("SPHÈRE", "PANO", "HDR", "NUIT", "PORTRAIT", "PHOTO", "PRO").forEach { mode ->
                         ModeLabel(mode, selectedMode == mode) { selectedMode = mode }
                     }
                 }
@@ -584,6 +638,14 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                     SettingTile("Galerie", "Ouvrir la galerie installée sur le téléphone", "Ouvrir") { openSystemGallery() }
                     SectionTitle("INTELLIGENCE ARTIFICIELLE", "Traitement local sur le téléphone.")
                     SettingTile("Analyse IA", if (aiEnabled) "Analyse locale activée après capture" else "Analyse désactivée", if (aiEnabled) "Désactiver" else "Activer") { aiEnabled = !aiEnabled }
+                    SettingTile("Agrandissement local (interpolation)", if (localUpscale) "Activé · ×$upscaleFactor après capture · sans IA neuronale" else "Désactivé", if (localUpscale) "Désactiver" else "Activer") { localUpscale = !localUpscale }
+                    SettingTile("Facteur d’agrandissement", "×$upscaleFactor", "Changer") { upscaleFactor = listOf(2,3,4,8).let { it[(it.indexOf(upscaleFactor)+1)%it.size] } }
+                    SettingTile("Algorithme d’agrandissement", "$upscaleMethod · interpolation classique", "Changer") { upscaleMethod = listOf("Bilinéraire", "Voisin proche").let { it[(it.indexOf(upscaleMethod)+1)%it.size] } }
+                    SettingTile("Amélioration du zoom", if (zoomEnhance) "Activée · traitement après capture" else "Désactivée", if (zoomEnhance) "Désactiver" else "Activer") { zoomEnhance = !zoomEnhance }
+                    SettingTile("Réduction du bruit", noiseMethod, "Changer") { noiseMethod = listOf("Désactivé", "Médian", "Gaussien").let { it[(it.indexOf(noiseMethod)+1)%it.size] } }
+                    Text("Lissage : $smoothing %", color = Color.White); Slider(value = smoothing.toFloat(), onValueChange = { smoothing = it.roundToInt() }, valueRange = 0f..100f)
+                    Text("Netteté : $sharpening %", color = Color.White); Slider(value = sharpening.toFloat(), onValueChange = { sharpening = it.roundToInt() }, valueRange = 0f..100f)
+                    Text("Traitement hors ligne, sans modèle neuronal pour le moment. La photo originale est conservée ; les détails absents ne peuvent pas être recréés fidèlement.", color = Muted, fontSize = 12.sp)
                     SettingTile("Mise au point tactile", "Touchez l’aperçu pour faire le point ; l’AF continu reste actif", "Retour caméra") { page = AppPage.CAMERA }
                     SectionTitle("PORTRAIT IA", "Réglages du détourage et de la mosaïque d’arrière-plan.")
                     SettingTile("Afficher les réglages portrait", if (showPortraitControls) "Panneau de réglage visible" else "Panneau de réglage masqué", if (showPortraitControls) "Masquer" else "Afficher") { showPortraitControls = !showPortraitControls }
@@ -776,6 +838,42 @@ private fun CompositionGrid(modifier: Modifier = Modifier) {
     }
 }
 
+
+@Composable
+private fun ElectronicLevel(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    var rollDegrees by remember { mutableStateOf(0f) }
+    var hasSensor by remember { mutableStateOf(false) }
+    DisposableEffect(context) {
+        val manager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        val sensor = manager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
+        hasSensor = sensor != null
+        val listener = object : SensorEventListener {
+            private val rotation = FloatArray(9)
+            private val orientation = FloatArray(3)
+            override fun onSensorChanged(event: SensorEvent) {
+                if (event.sensor.type == Sensor.TYPE_ROTATION_VECTOR) {
+                    SensorManager.getRotationMatrixFromVector(rotation, event.values)
+                    SensorManager.getOrientation(rotation, orientation)
+                    rollDegrees = Math.toDegrees(orientation[2].toDouble()).toFloat()
+                }
+            }
+            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+        }
+        if (sensor != null) manager.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_UI)
+        onDispose { manager.unregisterListener(listener) }
+    }
+    if (hasSensor) {
+        val angle = ((rollDegrees + 180f) % 360f + 360f) % 360f - 180f
+        Box(modifier.size(width = 116.dp, height = 36.dp).clip(RoundedCornerShape(18.dp)).background(Color(0x99090B0E)), contentAlignment = Alignment.Center) {
+            Canvas(Modifier.fillMaxWidth().height(2.dp).rotate(-angle)) {
+                drawLine(if (kotlin.math.abs(angle) < 1.5f) Accent else Color.White, Offset(0f, size.height / 2f), Offset(size.width, size.height / 2f), strokeWidth = 3.dp.toPx())
+            }
+            Text("${angle.roundToInt()}°", color = if (kotlin.math.abs(angle) < 1.5f) Accent else Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
 @Composable
 private fun CameraPreview(
     lensFacing: Int,
@@ -865,6 +963,13 @@ private fun capturePhoto(
     cameraExecutor: ExecutorService,
     outputFormat: String,
     aiEnabled: Boolean,
+    localUpscale: Boolean,
+    zoomEnhance: Boolean,
+    upscaleFactor: Int,
+    upscaleMethod: String,
+    noiseMethod: String,
+    smoothing: Int,
+    sharpening: Int,
     portraitPixelSize: Int,
     portraitShape: String,
     portraitEdgeSoftness: Int,
@@ -872,6 +977,9 @@ private fun capturePhoto(
     onAnalysis: (String) -> Unit
 ) {
     fun analyze(uri: android.net.Uri) {
+        if (localUpscale || zoomEnhance) LocalPhotoEnhancer.process(context, uri, localUpscale, zoomEnhance, upscaleFactor, upscaleMethod, noiseMethod, smoothing, sharpening, cameraExecutor) { result, failure ->
+            if (failure != null) Toast.makeText(context, "$failure Photo originale conservée.", Toast.LENGTH_LONG).show()
+        }
         if (!aiEnabled) { onAnalysis("Photo enregistrée · analyse IA désactivée"); return }
         try {
             ImageLabeling.getClient(ImageLabelerOptions.DEFAULT_OPTIONS).process(InputImage.fromFilePath(context, uri))
@@ -941,6 +1049,81 @@ private fun capturePhoto(
             android.os.Handler(android.os.Looper.getMainLooper()).post {
                 Toast.makeText(context, "Échec de la capture : ${exception.message}", Toast.LENGTH_LONG).show()
             }
+        }
+    })
+}
+
+
+private fun captureGuidedPanoramaFrame(
+    context: Context,
+    imageCapture: ImageCapture,
+    ioExecutor: ExecutorService,
+    currentFrames: List<Bitmap>,
+    targetFrames: Int,
+    onFrame: (List<Bitmap>, Boolean) -> Unit,
+    onError: (String) -> Unit
+) {
+    val stamp = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())
+    val fileValues = ContentValues().apply {
+        put(MediaStore.MediaColumns.DISPLAY_NAME, "OmniCam_Guided_$stamp.jpg")
+        put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/OmniCam/Guided")
+    }
+    val output = ImageCapture.OutputFileOptions.Builder(
+        context.contentResolver, MediaStore.Images.Media.EXTERNAL_CONTENT_URI, fileValues
+    ).build()
+    imageCapture.takePicture(output, ioExecutor, object : ImageCapture.OnImageSavedCallback {
+        override fun onImageSaved(results: ImageCapture.OutputFileResults) {
+            val uri = results.savedUri
+            if (uri == null) {
+                android.os.Handler(android.os.Looper.getMainLooper()).post { onError("URI de capture indisponible.") }
+                return
+            }
+            val bitmap = runCatching {
+                context.contentResolver.openInputStream(uri).use { BitmapFactory.decodeStream(it) }
+            }.getOrNull()
+            if (bitmap == null) {
+                android.os.Handler(android.os.Looper.getMainLooper()).post { onError("Lecture de l’image impossible.") }
+                return
+            }
+            val frames = currentFrames + bitmap
+            if (frames.size < targetFrames) {
+                android.os.Handler(android.os.Looper.getMainLooper()).post { onFrame(frames, false) }
+                return
+            }
+            try {
+                val commonHeight = frames.minOf { it.height }
+                val normalized = frames.map { frame ->
+                    if (frame.height == commonHeight) frame
+                    else Bitmap.createScaledBitmap(frame, (frame.width * commonHeight.toFloat() / frame.height).roundToInt(), commonHeight, true)
+                }
+                val advance = normalized.map { (it.width * 0.75f).roundToInt().coerceAtLeast(1) }
+                val outputWidth = advance.sum() + normalized.last().width - advance.last()
+                val stitched = Bitmap.createBitmap(outputWidth, commonHeight, Bitmap.Config.ARGB_8888)
+                val canvas = android.graphics.Canvas(stitched)
+                var left = 0f
+                normalized.forEachIndexed { index, frame ->
+                    canvas.drawBitmap(frame, left, 0f, null)
+                    if (index < normalized.lastIndex) left += advance[index]
+                }
+                val finalValues = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, "OmniCam_Panorama_$stamp.jpg")
+                    put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/OmniCam")
+                }
+                val finalUri = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, finalValues)
+                    ?: error("Création du panorama impossible")
+                context.contentResolver.openOutputStream(finalUri).use {
+                    if (it == null || !stitched.compress(Bitmap.CompressFormat.JPEG, 94, it)) error("Écriture du panorama impossible")
+                }
+                stitched.recycle()
+                android.os.Handler(android.os.Looper.getMainLooper()).post { onFrame(emptyList(), true) }
+            } catch (error: Exception) {
+                android.os.Handler(android.os.Looper.getMainLooper()).post { onError("Assemblage impossible : " + error.message) }
+            }
+        }
+        override fun onError(exception: ImageCaptureException) {
+            android.os.Handler(android.os.Looper.getMainLooper()).post { onError("Capture guidée échouée : " + exception.message) }
         }
     })
 }
