@@ -194,6 +194,11 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
     var aiEnabled by remember { mutableStateOf(true) }
     var localUpscale by remember { mutableStateOf(false) }
     var zoomEnhance by remember { mutableStateOf(false) }
+    var upscaleFactor by remember { mutableIntStateOf(2) }
+    var upscaleMethod by remember { mutableStateOf("Bicubique") }
+    var noiseMethod by remember { mutableStateOf("Désactivé") }
+    var smoothing by remember { mutableIntStateOf(0) }
+    var sharpening by remember { mutableIntStateOf(45) }
     var manualControls by remember { mutableStateOf(false) }
     var manualIso by remember { mutableStateOf(400) }
     var manualExposureNs by remember { mutableStateOf(10_000_000L) }
@@ -276,6 +281,11 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
         aiEnabled = preferences.getBoolean("aiEnabled", true)
         localUpscale = preferences.getBoolean("localUpscale", false)
         zoomEnhance = preferences.getBoolean("zoomEnhance", false)
+        upscaleFactor = preferences.getInt("upscaleFactor", 2).takeIf { it in listOf(2,3,4,8,16) } ?: 2
+        upscaleMethod = preferences.getString("upscaleMethod", "Bicubique")?.takeIf { it in listOf("Bilinéraire", "Bicubique", "Lanczos3") } ?: "Bicubique"
+        noiseMethod = preferences.getString("noiseMethod", "Désactivé")?.takeIf { it in listOf("Désactivé", "Médian", "Gaussien") } ?: "Désactivé"
+        smoothing = preferences.getInt("smoothing", 0).coerceIn(0,100)
+        sharpening = preferences.getInt("sharpening", 45).coerceIn(0,100)
         manualControls = preferences.getBoolean("manualControls", false)
         manualIso = preferences.getInt("manualIso", 400)
         manualExposureNs = preferences.getLong("manualExposureNs", 10_000_000L)
@@ -296,7 +306,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
     }
     LaunchedEffect(
         preferencesLoaded, selectedMode, lensFacing, selectedCameraId, showGrid, openAfterPhoto, flashEnabled,
-        outputFormat, aiEnabled, localUpscale, zoomEnhance, manualControls, manualIso, manualExposureNs, temperatureKelvin,
+        outputFormat, aiEnabled, localUpscale, zoomEnhance, upscaleFactor, upscaleMethod, noiseMethod, smoothing, sharpening, manualControls, manualIso, manualExposureNs, temperatureKelvin,
         videoQuality, videoFps, photoResolution, timerSeconds, burstCount, showPortraitControls, portraitPixelSize,
         portraitShape, portraitEdgeSoftness, portraitMosaicSmoothing
     ) {
@@ -311,6 +321,11 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
             .putBoolean("aiEnabled", aiEnabled)
             .putBoolean("localUpscale", localUpscale)
             .putBoolean("zoomEnhance", zoomEnhance)
+            .putInt("upscaleFactor", upscaleFactor)
+            .putString("upscaleMethod", upscaleMethod)
+            .putString("noiseMethod", noiseMethod)
+            .putInt("smoothing", smoothing)
+            .putInt("sharpening", sharpening)
             .putBoolean("manualControls", manualControls)
             .putInt("manualIso", manualIso)
             .putLong("manualExposureNs", manualExposureNs)
@@ -376,7 +391,7 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
         } else if (boundCamera == null) {
             Toast.makeText(context, "Caméra indisponible", Toast.LENGTH_SHORT).show()
         } else {
-            capturePhoto(context, capture, boundCamera!!, selectedMode, cameraExecutor, outputFormat, aiEnabled, localUpscale, zoomEnhance, portraitPixelSize, portraitShape, portraitEdgeSoftness, portraitMosaicSmoothing) { summary ->
+            capturePhoto(context, capture, boundCamera!!, selectedMode, cameraExecutor, outputFormat, aiEnabled, localUpscale, zoomEnhance, upscaleFactor, upscaleMethod, noiseMethod, smoothing, sharpening, portraitPixelSize, portraitShape, portraitEdgeSoftness, portraitMosaicSmoothing) { summary ->
                 aiStatus = summary
                 latestPhoto = loadLatestPhotoBitmap(context)
                 if (openAfterPhoto) page = AppPage.AI
@@ -590,8 +605,13 @@ private fun OmniCamApp(cameraExecutor: ExecutorService) {
                     SettingTile("Galerie", "Ouvrir la galerie installée sur le téléphone", "Ouvrir") { openSystemGallery() }
                     SectionTitle("INTELLIGENCE ARTIFICIELLE", "Traitement local sur le téléphone.")
                     SettingTile("Analyse IA", if (aiEnabled) "Analyse locale activée après capture" else "Analyse désactivée", if (aiEnabled) "Désactiver" else "Activer") { aiEnabled = !aiEnabled }
-                    SettingTile("Agrandissement local ×2", if (localUpscale) "Activé · copie agrandie après capture" else "Désactivé", if (localUpscale) "Désactiver" else "Activer") { localUpscale = !localUpscale }
-                    SettingTile("Amélioration du zoom", if (zoomEnhance) "Activée · netteté et réduction du bruit après capture" else "Désactivée", if (zoomEnhance) "Désactiver" else "Activer") { zoomEnhance = !zoomEnhance }
+                    SettingTile("Agrandissement local", if (localUpscale) "Activé · ×$upscaleFactor après capture" else "Désactivé", if (localUpscale) "Désactiver" else "Activer") { localUpscale = !localUpscale }
+                    SettingTile("Facteur d’agrandissement", "×$upscaleFactor", "Changer") { upscaleFactor = listOf(2,3,4,8,16).let { it[(it.indexOf(upscaleFactor)+1)%it.size] } }
+                    SettingTile("Algorithme d’agrandissement", upscaleMethod, "Changer") { upscaleMethod = listOf("Bilinéraire", "Bicubique", "Lanczos3").let { it[(it.indexOf(upscaleMethod)+1)%it.size] } }
+                    SettingTile("Amélioration du zoom", if (zoomEnhance) "Activée · traitement après capture" else "Désactivée", if (zoomEnhance) "Désactiver" else "Activer") { zoomEnhance = !zoomEnhance }
+                    SettingTile("Réduction du bruit", noiseMethod, "Changer") { noiseMethod = listOf("Désactivé", "Médian", "Gaussien").let { it[(it.indexOf(noiseMethod)+1)%it.size] } }
+                    Text("Lissage : $smoothing %", color = Color.White); Slider(value = smoothing.toFloat(), onValueChange = { smoothing = it.roundToInt() }, valueRange = 0f..100f)
+                    Text("Netteté : $sharpening %", color = Color.White); Slider(value = sharpening.toFloat(), onValueChange = { sharpening = it.roundToInt() }, valueRange = 0f..100f)
                     Text("Traitement hors ligne, sans modèle neuronal pour le moment. La photo originale est conservée ; les détails absents ne peuvent pas être recréés fidèlement.", color = Muted, fontSize = 12.sp)
                     SettingTile("Mise au point tactile", "Touchez l’aperçu pour faire le point ; l’AF continu reste actif", "Retour caméra") { page = AppPage.CAMERA }
                     SectionTitle("PORTRAIT IA", "Réglages du détourage et de la mosaïque d’arrière-plan.")
@@ -876,6 +896,11 @@ private fun capturePhoto(
     aiEnabled: Boolean,
     localUpscale: Boolean,
     zoomEnhance: Boolean,
+    upscaleFactor: Int,
+    upscaleMethod: String,
+    noiseMethod: String,
+    smoothing: Int,
+    sharpening: Int,
     portraitPixelSize: Int,
     portraitShape: String,
     portraitEdgeSoftness: Int,
@@ -883,7 +908,7 @@ private fun capturePhoto(
     onAnalysis: (String) -> Unit
 ) {
     fun analyze(uri: android.net.Uri) {
-        if (localUpscale || zoomEnhance) LocalPhotoEnhancer.process(context, uri, localUpscale, zoomEnhance, cameraExecutor) { result ->
+        if (localUpscale || zoomEnhance) LocalPhotoEnhancer.process(context, uri, localUpscale, zoomEnhance, upscaleFactor, upscaleMethod, noiseMethod, smoothing, sharpening, cameraExecutor) { result ->
             if (result == null) Toast.makeText(context, "Amélioration indisponible ; original conservé", Toast.LENGTH_SHORT).show()
         }
         if (!aiEnabled) { onAnalysis("Photo enregistrée · analyse IA désactivée"); return }
