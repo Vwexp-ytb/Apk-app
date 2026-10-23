@@ -73,8 +73,8 @@ internal object LocalPhotoEnhancer {
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
 
         var sample = 1
-        while ((bounds.outWidth.toLong() / (sample * 2L)) * (bounds.outHeight.toLong() / (sample * 2L)) > MAX_PIXELS ||
-            bounds.outWidth / (sample * 2) > MAX_DIMENSION || bounds.outHeight / (sample * 2) > MAX_DIMENSION) {
+        while ((bounds.outWidth.toLong() / sample) * (bounds.outHeight.toLong() / sample) > MAX_PIXELS ||
+            bounds.outWidth / sample > MAX_DIMENSION || bounds.outHeight / sample > MAX_DIMENSION) {
             sample *= 2
         }
         val options = BitmapFactory.Options().apply {
