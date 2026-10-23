@@ -62,19 +62,20 @@ jobs:
       - name: Build debug APK
         run: gradle :app:assembleDebug --no-daemon
         working-directory: OmniCamAI
-      - name: Build release candidate (unsigned in CI)
-        run: gradle :app:assembleRelease --no-daemon
-        working-directory: OmniCamAI
+      - name: Verify installable debug APK signature
+        run: |
+          APK="OmniCamAI/app/build/outputs/apk/debug/app-debug.apk"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          "$APKSIGNER" verify --verbose "$APK"
       - name: Export dependency inventory
         run: gradle :app:dependencies --configuration releaseRuntimeClasspath --no-daemon > dependencies-release.txt
         working-directory: OmniCamAI
       - name: Upload build and dependency reports
         uses: actions/upload-artifact@v4
         with:
-          name: OmniCamAI-ci-candidates
+          name: OmniCamAI-installable-debug-APK
           path: |
             OmniCamAI/app/build/outputs/apk/debug/app-debug.apk
-            OmniCamAI/app/build/outputs/apk/release/app-release-unsigned.apk
             OmniCamAI/app/build/reports/lint-results-debug.html
             OmniCamAI/dependencies-release.txt
           if-no-files-found: error
