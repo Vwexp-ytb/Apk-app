@@ -72,8 +72,10 @@ internal object LocalPhotoEnhancer {
         } ?: return null
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
 
+        val requestedFactor = if (upscale) upscaleFactor.coerceIn(2, 8) else 1
+        val decodePixelLimit = MAX_PIXELS / (requestedFactor.toLong() * requestedFactor)
         var sample = 1
-        while ((bounds.outWidth.toLong() / sample) * (bounds.outHeight.toLong() / sample) > MAX_PIXELS ||
+        while ((bounds.outWidth.toLong() / sample) * (bounds.outHeight.toLong() / sample) > decodePixelLimit ||
             bounds.outWidth / sample > MAX_DIMENSION || bounds.outHeight / sample > MAX_DIMENSION) {
             sample *= 2
         }
@@ -89,7 +91,6 @@ internal object LocalPhotoEnhancer {
         var finalBitmap: Bitmap? = null
         var outputUri: Uri? = null
         try {
-            val requestedFactor = if (upscale) upscaleFactor.coerceIn(2, 8) else 1
             val pixelLimitedFactor = sqrt(MAX_PIXELS.toDouble() / (original.width.toLong() * original.height))
                 .toInt().coerceAtLeast(1)
             val factor = minOf(requestedFactor, pixelLimitedFactor).coerceAtLeast(1)
